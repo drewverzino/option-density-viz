@@ -25,28 +25,30 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 ### preprocess/ (cleaning, transforms) 🧮
 
-- [ ] preprocess/midprice.py — robust mids  
+*(Core preprocessing helpers are shipped; add enhancements or edge-case handling here.)*
+
+- [ ] preprocess/midprice.py — enhancements  
   Owner: ___ · Tags: 🧮  
   <details><summary>Spec & DoD</summary>
   
-  - `(bid+ask)/2`, fallback to available side; flags: crossed, wide.  
-  - DoD: unit tests cover NA/missing/crossed cases; returns mids + flags.
+  - Add configurable outlier rejection and timestamp staleness checks.  
+  - DoD: unit tests for outlier clipping & staleness pass.
   </details>
 
-- [ ] preprocess/pcp.py — put-call parity synth  
+- [ ] preprocess/pcp.py — diagnostics extras  
   Owner: ___ · Tags: 🧮  
   <details><summary>Spec & DoD</summary>
   
-  - `C + K e^{-rT} = P + S`; synthesize missing leg; residual diagnostics.  
-  - DoD: residuals histogram produced; threshold alert hook.
+  - Add residual histogram helper & threshold alert callback.  
+  - DoD: function returns bins/alerts; plotted in notebook.
   </details>
 
-- [ ] preprocess/forward.py — forward & log-moneyness  
+- [ ] preprocess/forward.py — robustness  
   Owner: ___ · Tags: 🧮  
   <details><summary>Spec & DoD</summary>
   
-  - `F = S * exp(rT)`; `k = log(K/F)`; consistency checks with PCP.  
-  - DoD: forwards within tolerance vs. synthetic call spread estimate.
+  - Add fallback to put–call average forward if pairs are sparse; warn on instability.  
+  - DoD: unit test with sparse pairs passes; warning surfaced.
   </details>
 
 ### vol/ (smiles, surfaces) 📈
@@ -126,8 +128,8 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   Owner: ___ · Tags: 🧪  
   <details><summary>Spec & DoD</summary>
   
-  - yfinance: `.option_chain()` object access; OKX: YYMMDD parsing; signing (skipped if no creds).  
-  - DoD: coverage ≥80%; CI green.
+  - Remaining: yfinance/OKX network smoke tests, failure-path tests, and coverage consolidation.  
+  - DoD: coverage ≥80%; network tests opt-in via env flag.
   </details>
 
 ---
@@ -187,7 +189,7 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   <details><summary>What shipped</summary>
   
   - `AsyncRateLimiter(max_concurrent)` and `retry_with_backoff(...)` with jitter.  
-  - Sample usage patterns for API calls.
+  - Integrated into OKX ticker fetch loop; patterns documented.
   </details>
 
 - [x] data/yf_fetcher.py — equities via yfinance (sync → `asyncio.to_thread`)  
@@ -205,13 +207,59 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   - Public instruments/tickers/index spot; helpful error body on failures.
   </details>
 
-### notebooks & docs 📦
+### preprocess/ 🧮
+
+- [x] preprocess/midprice.py — robust mids + flags  
+  Owner: Drew · Tags: 🧮  
+  <details><summary>What shipped</summary>
+  
+  - Vectorized mids with fallback (bid-only/ask-only), crossed/wide flags, relative spread.  
+  - Side-used label for auditing; NaN-safe; configurable thresholds.
+  </details>
+
+- [x] preprocess/pcp.py — put–call parity diagnostics  
+  Owner: Drew · Tags: 🧮  
+  <details><summary>What shipped</summary>
+  
+  - Synthetic legs from PCP; residual computation; strike-pivot helper.  
+  - Clean API for plugging into notebooks and tests.
+  </details>
+
+- [x] preprocess/forward.py — forward & log-moneyness  
+  Owner: Drew · Tags: 🧮  
+  <details><summary>What shipped</summary>
+  
+  - Forward formula, log-moneyness, and a robust forward estimator from PCP pairs with optional spread-based weights.
+  </details>
+
+### tests & notebooks 📦
+
+- [x] tests/preprocess_* — unit tests for preprocess  
+  Owner: Drew · Tags: 🧪  
+  <details><summary>What shipped</summary>
+  
+  - `test_preprocess_midprice.py`, `test_preprocess_pcp.py`, `test_preprocess_forward.py` covering mids, PCP identities, and forward estimation.
+  </details>
 
 - [x] notebooks/data_test.ipynb — end-to-end data validation  
   Owner: Drew · Tags: 📦  
   <details><summary>What shipped</summary>
   
   - PYTHONPATH setup; equity + crypto chain tests; cache/risk-free/limiter demos; CSV round-trip.
+  </details>
+
+- [x] notebooks/full_pipeline_test.ipynb — data → preprocess pipeline  
+  Owner: Drew · Tags: 📦  
+  <details><summary>What shipped</summary>
+  
+  - Fetch chain (equity/crypto), compute mids & PCP diagnostics, estimate forward, log-moneyness, quick visuals, save CSV/PNGs.
+  </details>
+
+- [x] README — updated with Results & Theory Deep Dive  
+  Owner: Drew · Tags: 📦  
+  <details><summary>What shipped</summary>
+  
+  - Pitch-style overview, artifacts/metrics in Results, and a deeper theory section (RN measure, SVI, BL, COS).
   </details>
 
 ---

@@ -150,7 +150,7 @@ We summarize each snapshot (per expiry) with:
 
 ### Reproduce these results
 
-1. Run `notebooks/OptionViz_Data_Tests.ipynb` for **AAPL** and **BTC**.  
+1. Run `notebooks/data_test.ipynb` for **AAPL** and **BTC**.  
 2. Export figures to `docs/` (e.g., `example_smile_aapl.png`, `example_density_btc.png`).  
 3. (When modeling modules are added) run the “Report” cell to print/save a metrics table (CSV/JSON) to `docs/results/`.
 
@@ -169,67 +169,61 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 ### 1) Risk‑neutral measure, forwards, and log‑moneyness
 
 - Under the **risk‑neutral (Q) measure**, discounted asset prices are martingales. Pricing expectations are taken under Q with the risk‑free discount.
-- **Put–Call Parity (PCP)** for European options (no divs): `C − P = S − K e^{−rT}`. With dividends/carry you use `S_0 e^{−qT}` or the **forward** `F = S_0 e^{(r−q)T}`.
-- We prefer to work in **log‑moneyness**: `k = ln(K / F)`. This centers smiles across assets and maturities and is the natural coordinate for SVI.
+- **Put–Call Parity (PCP)** for European options (no divs): $C - P = S - K e^{-rT}$. With dividends/carry you use $S_0 e^{-qT}$ or the **forward** $F = S_0 e^{(r-q)T}$.
+- We prefer to work in **log‑moneyness**: $k = \ln(K / F)$. This centers smiles across assets and maturities and is the natural coordinate for SVI.
 
 ### 2) From implied volatility to total variance
 
-- Market quotes give implied volatilities `σ_imp(K, T)` (or prices). We convert to **total variance** `w(k, T) = σ_imp^2(T) · T`.
-- SVI and many no‑arbitrage conditions are easier to express in terms of `w` (linear in time and convex in strike).
+- Market quotes give implied volatilities $\sigma_{imp}(K, T)$ (or prices). We convert to **total variance** $w(k, T) = \sigma_{imp}^2(T) \cdot T$.
+- SVI and many no‑arbitrage conditions are easier to express in terms of $w$ (linear in time and convex in strike).
 
 ### 3) SVI smile (per expiry) and calibration
 
-- **SVI (Stochastic Volatility Inspired)** parameterizes total variance for a fixed `T`:
+- **SVI (Stochastic Volatility Inspired)** parameterizes total variance for a fixed $T$:
 
-  ```
-  w(k) = a + b { ρ (k − m) + sqrt( (k − m)^2 + σ^2 ) }
-  ```
+  $$w(k) = a + b \left\{ \rho (k - m) + \sqrt{ (k - m)^2 + \sigma^2 } \right\}$$
 
-  Parameters: `a` (level), `b` (slope), `ρ` (skew, |ρ|<1), `m` (shift), `σ` (wing curvature, >0).
+  Parameters: $a$ (level), $b$ (slope), $\rho$ (skew, $|\rho|<1$), $m$ (shift), $\sigma$ (wing curvature, $>0$).
 - **Why SVI?** It fits empirical smiles well and admits known **sufficient conditions** for (approximate) no‑arbitrage.
 - **Calibration tips used/planned**:
   - **Seeds** from coarse grid / heuristics (ATM slope/curvature).
   - **Vega‑weighted loss** in **total variance** (not IV) to emphasize informative strikes.
-  - **Bounds/regularization** on `(a,b,ρ,m,σ)` to avoid pathological wings.
-  - (Across maturities) smooth parameters over `T` and check calendar monotonicity of `w(·,T)`.
+  - **Bounds/regularization** on $(a,b,\rho,m,\sigma)$ to avoid pathological wings.
+  - (Across maturities) smooth parameters over $T$ and check calendar monotonicity of $w(\cdot,T)$.
 
 ### 4) No‑arbitrage checks (sanity layer)
 
-- **Butterfly (static) arbitrage:** Calls must be **convex in K** (`∂²C/∂K² ≥ 0`). We screen the fitted smile or the price curve for negativity.
-- **Calendar arbitrage:** Total variance should be **non‑decreasing in T** for fixed `k`. We spot‑check adjacent maturities.
-- **Data hygiene:** Filter **crossed** (`bid>ask`) / **wide** spreads and stale quotes; compute robust mids before fitting.
+- **Butterfly (static) arbitrage:** Calls must be **convex in K** ($\partial^2C/\partial K^2 \geq 0$). We screen the fitted smile or the price curve for negativity.
+- **Calendar arbitrage:** Total variance should be **non‑decreasing in T** for fixed $k$. We spot‑check adjacent maturities.
+- **Data hygiene:** Filter **crossed** ($bid>ask$) / **wide** spreads and stale quotes; compute robust mids before fitting.
 
 ### 5) Breeden–Litzenberger (BL) density (model‑free)
 
 - BL states the **risk‑neutral PDF** is the **second derivative** of the call price with respect to strike (under mild conditions):
 
-  ```
-  f_Q(K,T) = ∂²C(K,T)/∂K² · e^{rT}
-  ```
+  $$f_Q(K,T) = \frac{\partial^2C(K,T)}{\partial K^2} \cdot e^{rT}$$
 
 - Numerically fragile → we stabilize by:
-  - Smoothing the **call price curve** in `K` (e.g., monotone splines / regularized fits).
+  - Smoothing the **call price curve** in $K$ (e.g., monotone splines / regularized fits).
   - Using **central or higher‑order finite differences** with **adaptive spacing**.
   - Enforcing **boundary behavior** (wing extrapolation consistent with forwards).
-- Diagnostics: `f_Q ≥ 0`, `∫ f_Q dK ≈ 1`, RN mean ≈ forward.
+- Diagnostics: $f_Q \geq 0$, $\int f_Q dK \approx 1$, RN mean ≈ forward.
 
 ### 6) COS method (spectral, model‑driven)
 
-- **COS** recovers densities/prices from a **characteristic function** via a truncated cosine series on `[a,b]`:
+- **COS** recovers densities/prices from a **characteristic function** via a truncated cosine series on $[a,b]$:
 
-  ```
-  C(K) ≈ e^{−rT} \sum_{n=0}^{N−1} Re( ϕ( u_n ) · F_n(K) )
-  ```
+  $$C(K) \approx e^{-rT} \sum_{n=0}^{N-1} \text{Re}\left( \phi( u_n ) \cdot F_n(K) \right)$$
 
-  where `ϕ` is the CF of log‑price, `u_n = nπ/(b−a)`, and `F_n` are known coefficients.
+  where $\phi$ is the CF of log‑price, $u_n = n\pi/(b-a)$, and $F_n$ are known coefficients.
 - Key practical choices:
-  - **Truncation bounds** `[a,b]` from **cumulants** (match mean/variance/skew/kurtosis).
-  - **Series length** `N` from an error budget (trade speed vs accuracy).
-- COS is extremely fast and stable once `ϕ` is known; we use it to cross‑check BL.
+  - **Truncation bounds** $[a,b]$ from **cumulants** (match mean/variance/skew/kurtosis).
+  - **Series length** $N$ from an error budget (trade speed vs accuracy).
+- COS is extremely fast and stable once $\phi$ is known; we use it to cross‑check BL.
 
 ### 7) Diagnostics & consistency checks
 
-- **Normalization**: `| ∫ f_Q − 1 | ≤ 1e−2`.
+- **Normalization**: $\left| \int f_Q - 1 \right| \leq 1e-2$.
 - **Forward consistency**: RN mean vs forward within a few **bps**.
 - **Moment checks**: Compare variance/skew/kurtosis from the density to those implied by the smile.
 - **Price‑from‑density**: Re‑integrate the density to recover call prices and measure error.
