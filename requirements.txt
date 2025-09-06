@@ -1,18 +1,26 @@
-httpx>=0.27.0
-websockets>=12.0
+# === Option Viz — Requirements ===
+# Core numerics + data
+numpy>=1.26
+pandas>=2.2
+scipy>=1.11
+
+# HTTP clients / data backends
+httpx>=0.27
 yfinance>=0.2.43
+python-dotenv>=1.0.1  # for .env (OKX creds, etc.)
 
-numpy>=1.26.0
-pandas>=2.2.0
-scipy>=1.13.0
-matplotlib>=3.8.0
-streamlit>=1.37.0
+# Plotting
+matplotlib>=3.8
 
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
+# Optional: interactive app & Parquet I/O
+streamlit>=1.35           # optional dashboard
+pyarrow>=15.0 ; platform_system != "Windows"  # optional Parquet writer/reader
+fastparquet>=2024.2.0 ; platform_system == "Windows"  # alternative Parquet on Windows
 
-black>=24.0.0
-flake8>=7.0.0
-mypy>=1.8.0
-
-python-dotenv>=1.0.1
+# Testing & tooling
+pytest>=8.0
+pytest-asyncio>=0.23
+black>=24.0
+flake8>=7.0
+mypy>=1.8
+nbformat>=5.10            # for notebook generation scripts

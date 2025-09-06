@@ -1,30 +1,29 @@
+# src/data/__init__.py
 """
 Option Viz — data package
 
-Backends and types for fetching normalized option chains from
+Convenience imports and documentation so end users can write:
+
+    from data import get_fetcher, OKXFetcher, YFinanceFetcher, OptionChain, OptionQuote
+
+Backends:
 - Equities (yfinance)
-- Crypto (OKX; public by default, optional private endpoints via .env)
+- Crypto (OKX public; optional private endpoints via .env)
 
-Quick start:
-    from data import get_fetcher
-    f = get_fetcher("equity")   # or "crypto"
-    exps = await f.list_expiries("AAPL")
-    chain = await f.fetch_chain("AAPL", exps[0])
-
-Env (for OKX private endpoints — optional):
+Optional env (for OKX private):
     OKX_API_KEY=...
     OKX_API_SECRET=...
     OKX_API_PASSPHRASE=...
-    OKX_SIMULATED=true  # if using demo/sim trading
+    OKX_SIMULATED=true
 """
 
 from .base import OptionQuote, OptionChain, OptionFetcher
 from .registry import get_fetcher
 
-# Optional, only if these files exist in your repo
+# Import backends defensively so partial checkouts/tests don't break imports
 try:
     from .yf_fetcher import YFinanceFetcher
-except Exception:  # keep imports resilient while you iterate
+except Exception:
     YFinanceFetcher = None  # type: ignore
 
 try:

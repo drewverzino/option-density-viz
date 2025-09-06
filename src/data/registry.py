@@ -1,8 +1,16 @@
 # src/data/registry.py
 from __future__ import annotations
 
-from typing import Literal
+"""
+Factory for returning a concrete data backend behind the OptionFetcher protocol.
 
+Why a registry:
+- Keeps app code simple: 'get_fetcher("equity")' or 'get_fetcher("crypto")'
+  instead of importing backend modules everywhere.
+- Encapsulates backend selection and any construction defaults in one place.
+"""
+
+from typing import Literal
 from .base import OptionFetcher
 from .yf_fetcher import YFinanceFetcher
 from .okx_fetcher import OKXFetcher
@@ -10,8 +18,10 @@ from .okx_fetcher import OKXFetcher
 
 def get_fetcher(asset_class: Literal["equity", "crypto"], **kwargs) -> OptionFetcher:
     """
-    Factory that returns a concrete fetcher behind the OptionFetcher protocol.
-    kwargs are forwarded to the underlying fetcher constructors.
+    Return a concrete fetcher.
+
+    kwargs are forwarded to the underlying fetcher constructors so callers can
+    override defaults (timeouts, currency labels, etc.).
     """
     if asset_class == "equity":
         return YFinanceFetcher(**kwargs)
