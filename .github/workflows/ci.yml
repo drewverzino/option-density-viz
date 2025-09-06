@@ -1,0 +1,25 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Lint (black, flake8)
+        run: |
+          black --check .
+          flake8 .
+      - name: Type check (mypy)
+        run: |
+          mypy src || true
+      - name: Run tests
+        env:
+          # Leave off network by default; enable per-PR by setting to 1 in workflow dispatch if needed.
+          ENABLE_NETWORK_TESTS: '0'
+        run: pytest -q
