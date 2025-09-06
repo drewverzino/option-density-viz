@@ -119,11 +119,122 @@ if __name__ == "__main__":
 
 ---
 
+## 📊 Results
+
+This section highlights example artifacts and the **metrics** we track to sanity‑check calibrations and densities. Commit a small set of figures to `docs/` so reviewers can skim results without running anything.
+
+### Artifacts (examples)
+
+- `docs/example_smile_aapl.png` — AAPL IV smile at a recent expiry
+- `docs/example_density_btc.png` — BTC risk‑neutral PDF at a recent expiry
+- `docs/example_cdf_btc.png` — BTC CDF with key quantiles
+
+> Tip: Export plots from the validation notebook and drop the files into `docs/` with short, dated filenames.
+
+### Metrics we report
+
+We summarize each snapshot (per expiry) with:
+
+| Metric | Meaning | Target / Check |
+|---|---|---|
+| Quotes used | Cleaned quotes after filters | Higher is better |
+| VW-RMSE (total variance) | Vega‑weighted fit error in **total variance** | ↓ vs. ATM‑only baseline |
+| Butterfly violations | Fraction of strikes with negative second derivative | < 1% |
+| Calendar violations | Any decrease of total variance with maturity | 0 |
+| ∫pdf − 1 | Density normalization error | ≤ 1e‑2 |
+| RN mean − Forward (bps) | Risk‑neutral mean vs forward | ≈ 0 |
+| Negative pdf rate | Share of grid with pdf < 0 | ≈ 0 |
+| Runtime (s) | Seconds per expiry | Informational |
+
+> Until the modeling modules land, focus results on **data completeness**, **consistency** (PCP/forward checks), and **reproducibility** (CSV/Parquet round‑trips).
+
+### Reproduce these results
+
+1. Run `notebooks/OptionViz_Data_Tests.ipynb` for **AAPL** and **BTC**.  
+2. Export figures to `docs/` (e.g., `example_smile_aapl.png`, `example_density_btc.png`).  
+3. (When modeling modules are added) run the “Report” cell to print/save a metrics table (CSV/JSON) to `docs/results/`.
+
 ## 📚 Theory Background
 
 - **Breeden–Litzenberger (1978)**: Risk-neutral density can be obtained as the **second derivative** of option prices w.r.t. strike.
 - **SVI (Stochastic Volatility Inspired)**: Robust parametrization of implied volatility smiles that enforces arbitrage-aware conditions.
 - **COS method**: Fourier expansion method that recovers probability densities from characteristic functions, offering numerical stability.
+
+---
+
+## 🧠 Theory Deep Dive
+
+This project sits at the intersection of **derivatives pricing** and **numerical analysis**. Below are the core concepts and how we use them.
+
+### 1) Risk‑neutral measure, forwards, and log‑moneyness
+
+- Under the **risk‑neutral (Q) measure**, discounted asset prices are martingales. Pricing expectations are taken under Q with the risk‑free discount.
+- **Put–Call Parity (PCP)** for European options (no divs): `C − P = S − K e^{−rT}`. With dividends/carry you use `S_0 e^{−qT}` or the **forward** `F = S_0 e^{(r−q)T}`.
+- We prefer to work in **log‑moneyness**: `k = ln(K / F)`. This centers smiles across assets and maturities and is the natural coordinate for SVI.
+
+### 2) From implied volatility to total variance
+
+- Market quotes give implied volatilities `σ_imp(K, T)` (or prices). We convert to **total variance** `w(k, T) = σ_imp^2(T) · T`.
+- SVI and many no‑arbitrage conditions are easier to express in terms of `w` (linear in time and convex in strike).
+
+### 3) SVI smile (per expiry) and calibration
+
+- **SVI (Stochastic Volatility Inspired)** parameterizes total variance for a fixed `T`:
+
+  ```
+  w(k) = a + b { ρ (k − m) + sqrt( (k − m)^2 + σ^2 ) }
+  ```
+
+  Parameters: `a` (level), `b` (slope), `ρ` (skew, |ρ|<1), `m` (shift), `σ` (wing curvature, >0).
+- **Why SVI?** It fits empirical smiles well and admits known **sufficient conditions** for (approximate) no‑arbitrage.
+- **Calibration tips used/planned**:
+  - **Seeds** from coarse grid / heuristics (ATM slope/curvature).
+  - **Vega‑weighted loss** in **total variance** (not IV) to emphasize informative strikes.
+  - **Bounds/regularization** on `(a,b,ρ,m,σ)` to avoid pathological wings.
+  - (Across maturities) smooth parameters over `T` and check calendar monotonicity of `w(·,T)`.
+
+### 4) No‑arbitrage checks (sanity layer)
+
+- **Butterfly (static) arbitrage:** Calls must be **convex in K** (`∂²C/∂K² ≥ 0`). We screen the fitted smile or the price curve for negativity.
+- **Calendar arbitrage:** Total variance should be **non‑decreasing in T** for fixed `k`. We spot‑check adjacent maturities.
+- **Data hygiene:** Filter **crossed** (`bid>ask`) / **wide** spreads and stale quotes; compute robust mids before fitting.
+
+### 5) Breeden–Litzenberger (BL) density (model‑free)
+
+- BL states the **risk‑neutral PDF** is the **second derivative** of the call price with respect to strike (under mild conditions):
+
+  ```
+  f_Q(K,T) = ∂²C(K,T)/∂K² · e^{rT}
+  ```
+
+- Numerically fragile → we stabilize by:
+  - Smoothing the **call price curve** in `K` (e.g., monotone splines / regularized fits).
+  - Using **central or higher‑order finite differences** with **adaptive spacing**.
+  - Enforcing **boundary behavior** (wing extrapolation consistent with forwards).
+- Diagnostics: `f_Q ≥ 0`, `∫ f_Q dK ≈ 1`, RN mean ≈ forward.
+
+### 6) COS method (spectral, model‑driven)
+
+- **COS** recovers densities/prices from a **characteristic function** via a truncated cosine series on `[a,b]`:
+
+  ```
+  C(K) ≈ e^{−rT} \sum_{n=0}^{N−1} Re( ϕ( u_n ) · F_n(K) )
+  ```
+
+  where `ϕ` is the CF of log‑price, `u_n = nπ/(b−a)`, and `F_n` are known coefficients.
+- Key practical choices:
+  - **Truncation bounds** `[a,b]` from **cumulants** (match mean/variance/skew/kurtosis).
+  - **Series length** `N` from an error budget (trade speed vs accuracy).
+- COS is extremely fast and stable once `ϕ` is known; we use it to cross‑check BL.
+
+### 7) Diagnostics & consistency checks
+
+- **Normalization**: `| ∫ f_Q − 1 | ≤ 1e−2`.
+- **Forward consistency**: RN mean vs forward within a few **bps**.
+- **Moment checks**: Compare variance/skew/kurtosis from the density to those implied by the smile.
+- **Price‑from‑density**: Re‑integrate the density to recover call prices and measure error.
+
+> In practice, a robust pipeline alternates between **modeling** (SVI/COS) and **model‑free** (BL) views, using diagnostics to decide when to trust which.
 
 ---
 

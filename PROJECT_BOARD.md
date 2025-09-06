@@ -15,14 +15,6 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 *(Core data layer is shipped; new data tasks can be added here as needed.)*
 
-- [ ] data/rate_limit.py — integrate limiter + retries in OKX fetcher call sites  
-  Owner: ___ · Tags: 🧱  
-  <details><summary>Spec & DoD</summary>
-  
-  - Wrap per-instrument ticker calls with `AsyncRateLimiter` and `retry_with_backoff`.  
-  - DoD: logs show retries on simulated 429; total runtime bounded by max concurrency.
-  </details>
-
 - [ ] data/historical_loader.py — add Parquet dependency docs & CLI example  
   Owner: ___ · Tags: 🧱  
   <details><summary>Spec & DoD</summary>
@@ -205,12 +197,12 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   - Fixed `.option_chain()` unpack bug; robust spot retrieval; IV forwarded via `extra["iv"]`.
   </details>
 
-- [x] data/okx_fetcher.py — crypto via OKX (public + private signing)  
-  Owner: Drew · Tags: 🧱 🔑  
+- [x] data/okx_fetcher.py — crypto via OKX (public endpoints)  
+  Owner: Drew · Tags: 🧱  
   <details><summary>What shipped</summary>
   
-  - YYMMDD/ YYYYMMDD expiry parsing; server-time sync; `x-simulated-trading` header; helpful error body on failures.  
-  - Public instruments/tickers/spot; optional private `/account/balance` with HMAC signing.
+  - YYMMDD/ YYYYMMDD expiry parsing; server-time sync; **integrated `AsyncRateLimiter` + `retry_with_backoff`** for ticker calls; **instrument list cached** via `KVCache` (1h TTL).  
+  - Public instruments/tickers/index spot; helpful error body on failures.
   </details>
 
 ### notebooks & docs 📦
@@ -219,8 +211,9 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   Owner: Drew · Tags: 📦  
   <details><summary>What shipped</summary>
   
-  - PYTHONPATH setup; equity + crypto chain tests; optional private balance; cache/risk-free/limiter demos; CSV round-trip.
+  - PYTHONPATH setup; equity + crypto chain tests; cache/risk-free/limiter demos; CSV round-trip.
   </details>
+
 ---
 
 ## New card template (copy below)
