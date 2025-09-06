@@ -1,15 +1,7 @@
-"""Visualization utilities for option-density-viz.
+"""Plotting helpers and Streamlit dashboard."""
+try:
+    from .plots import plot_smile, plot_density
+except Exception:
+    pass
 
-This subpackage contains functions to create static and interactive
-visualizations of risk‑neutral densities, implied volatility surfaces,
-and related metrics. Plotting functions are implemented using
-Matplotlib for static plots and Plotly for interactive web-friendly
-figures.
-"""
-
-from .plot import plot_density, plot_density_interactive
-
-__all__ = [
-    "plot_density",
-    "plot_density_interactive",
-]
+__all__ = [n for n in ["plot_smile","plot_density"] if n in globals()]

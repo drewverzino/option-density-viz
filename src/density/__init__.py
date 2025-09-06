@@ -1,14 +1,11 @@
-"""Risk‑neutral density estimators for option-density-viz.
+"""Risk-neutral density extraction: BL, CDF/quantiles."""
+try:
+    from .bl import bl_density
+except Exception:
+    pass
+try:
+    from .cdf import cdf, inv_cdf
+except Exception:
+    pass
 
-This subpackage provides functions to extract the implied risk‑neutral
-probability density from option price data. Two primary approaches are
-implemented: the Breeden–Litzenberger finite difference method and the
-COS Fourier expansion method.
-"""
-
-from .rnd import breeden_litzenberger, cos_density
-
-__all__ = [
-    "breeden_litzenberger",
-    "cos_density",
-]
+__all__ = [n for n in ["bl_density","cdf","inv_cdf"] if n in globals()]
