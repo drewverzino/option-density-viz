@@ -26,7 +26,9 @@ from .base import OptionFetcher, OptionChain, OptionQuote
 def _nan_to_none(x):
     """Coerce NaN to None; keep floats as floats."""
     try:
-        return None if x is None or (isinstance(x, float) and math.isnan(x)) else float(x)
+        return (
+            None if x is None or (isinstance(x, float) and math.isnan(x)) else float(x)
+        )
     except Exception:
         return None
 
@@ -40,6 +42,7 @@ class YFinanceFetcher(OptionFetcher):
 
     async def list_expiries(self, underlying: str) -> List[datetime]:
         """Return tz-aware expiry datetimes for the given underlying."""
+
         def _get():
             return yf.Ticker(underlying).options  # list[str] like "2025-12-19"
 
@@ -89,47 +92,51 @@ class YFinanceFetcher(OptionFetcher):
 
         # Build normalized quotes from calls
         for _, r in calls.iterrows():
-            quotes.append(OptionQuote(
-                symbol=str(r.get("contractSymbol")),
-                underlying=underlying,
-                asset_class="equity",
-                expiry=expiry,
-                strike=float(r["strike"]),
-                opt_type="C",
-                bid=_nan_to_none(r.get("bid")),
-                ask=_nan_to_none(r.get("ask")),
-                last=_nan_to_none(r.get("lastPrice")),
-                mark=None,
-                volume=_nan_to_none(r.get("volume")),
-                open_interest=_nan_to_none(r.get("openInterest")),
-                contract_size=self.contract_size,
-                underlying_ccy="USD",
-                quote_ccy="USD",
-                is_inverse=False,
-                extra={"iv": _nan_to_none(r.get("impliedVolatility"))},
-            ))
+            quotes.append(
+                OptionQuote(
+                    symbol=str(r.get("contractSymbol")),
+                    underlying=underlying,
+                    asset_class="equity",
+                    expiry=expiry,
+                    strike=float(r["strike"]),
+                    opt_type="C",
+                    bid=_nan_to_none(r.get("bid")),
+                    ask=_nan_to_none(r.get("ask")),
+                    last=_nan_to_none(r.get("lastPrice")),
+                    mark=None,
+                    volume=_nan_to_none(r.get("volume")),
+                    open_interest=_nan_to_none(r.get("openInterest")),
+                    contract_size=self.contract_size,
+                    underlying_ccy="USD",
+                    quote_ccy="USD",
+                    is_inverse=False,
+                    extra={"iv": _nan_to_none(r.get("impliedVolatility"))},
+                )
+            )
 
         # ...and from puts
         for _, r in puts.iterrows():
-            quotes.append(OptionQuote(
-                symbol=str(r.get("contractSymbol")),
-                underlying=underlying,
-                asset_class="equity",
-                expiry=expiry,
-                strike=float(r["strike"]),
-                opt_type="P",
-                bid=_nan_to_none(r.get("bid")),
-                ask=_nan_to_none(r.get("ask")),
-                last=_nan_to_none(r.get("lastPrice")),
-                mark=None,
-                volume=_nan_to_none(r.get("volume")),
-                open_interest=_nan_to_none(r.get("openInterest")),
-                contract_size=self.contract_size,
-                underlying_ccy="USD",
-                quote_ccy="USD",
-                is_inverse=False,
-                extra={"iv": _nan_to_none(r.get("impliedVolatility"))},
-            ))
+            quotes.append(
+                OptionQuote(
+                    symbol=str(r.get("contractSymbol")),
+                    underlying=underlying,
+                    asset_class="equity",
+                    expiry=expiry,
+                    strike=float(r["strike"]),
+                    opt_type="P",
+                    bid=_nan_to_none(r.get("bid")),
+                    ask=_nan_to_none(r.get("ask")),
+                    last=_nan_to_none(r.get("lastPrice")),
+                    mark=None,
+                    volume=_nan_to_none(r.get("volume")),
+                    open_interest=_nan_to_none(r.get("openInterest")),
+                    contract_size=self.contract_size,
+                    underlying_ccy="USD",
+                    quote_ccy="USD",
+                    is_inverse=False,
+                    extra={"iv": _nan_to_none(r.get("impliedVolatility"))},
+                )
+            )
 
         return OptionChain(
             underlying=underlying,

@@ -2,13 +2,14 @@ from datetime import datetime, timezone
 from data.base import OptionChain, OptionQuote
 from data.historical_loader import save_chain_csv, load_chain_csv
 
+
 def test_csv_roundtrip(tmp_path):
     # Build a tiny chain with one quote
     q = OptionQuote(
         symbol="SYM-20250101-100-C",
         underlying="AAPL",
         asset_class="equity",
-        expiry=datetime(2025,1,1,tzinfo=timezone.utc),
+        expiry=datetime(2025, 1, 1, tzinfo=timezone.utc),
         strike=100.0,
         opt_type="C",
         bid=1.0,

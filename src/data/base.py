@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Dict, List, Literal, Optional, Protocol
 
 # A couple of small, expressive type aliases for clarity
-OptType = Literal["C", "P"]        # option type: Call or Put
+OptType = Literal["C", "P"]  # option type: Call or Put
 AssetClass = Literal["equity", "crypto"]
 
 
@@ -35,12 +35,13 @@ class OptionQuote:
     - 'extra' exists to carry venue-specific goodies (e.g., implied vol from yfinance).
     - 'contract_size' is 100 for U.S. equity options; 1 for OKX options.
     """
+
     symbol: str
     underlying: str
     asset_class: AssetClass
-    expiry: datetime            # timezone-aware UTC recommended
+    expiry: datetime  # timezone-aware UTC recommended
     strike: float
-    opt_type: OptType           # "C" or "P"
+    opt_type: OptType  # "C" or "P"
     bid: Optional[float]
     ask: Optional[float]
     last: Optional[float]
@@ -48,10 +49,10 @@ class OptionQuote:
     volume: Optional[float]
     open_interest: Optional[float]
     contract_size: float
-    underlying_ccy: str         # e.g., "USD"
-    quote_ccy: str              # e.g., "USD", "USDT"
-    is_inverse: bool            # False for yfinance and OKX options
-    extra: Dict[str, float]     # optional fields like "iv"
+    underlying_ccy: str  # e.g., "USD"
+    quote_ccy: str  # e.g., "USD", "USDT"
+    is_inverse: bool  # False for yfinance and OKX options
+    extra: Dict[str, float]  # optional fields like "iv"
 
 
 @dataclass
@@ -61,6 +62,7 @@ class OptionChain:
 
     'spot' and 'asof_utc' travel alongside the quotes for reproducibility.
     """
+
     underlying: str
     asset_class: AssetClass
     spot: Optional[float]
@@ -80,5 +82,6 @@ class OptionFetcher(Protocol):
       - 'list_expiries' returns tz-aware datetimes
       - 'fetch_chain' returns an OptionChain with normalized OptionQuotes
     """
+
     async def list_expiries(self, underlying: str) -> List[datetime]: ...
     async def fetch_chain(self, underlying: str, expiry: datetime) -> OptionChain: ...

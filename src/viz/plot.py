@@ -13,7 +13,13 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-def plot_density(strikes: Iterable[float], density: Iterable[float], *, title: str = "Risk‑Neutral Density", ax: Optional[plt.Axes] = None) -> plt.Axes:
+def plot_density(
+    strikes: Iterable[float],
+    density: Iterable[float],
+    *,
+    title: str = "Risk‑Neutral Density",
+    ax: Optional[plt.Axes] = None,
+) -> plt.Axes:
     """Create a static plot of the risk‑neutral density using Matplotlib.
 
     This stub defines the API for producing a Matplotlib plot of a
@@ -38,7 +44,12 @@ def plot_density(strikes: Iterable[float], density: Iterable[float], *, title: s
     )
 
 
-def plot_density_interactive(strikes: Iterable[float], density: Iterable[float], *, title: str = "Risk‑Neutral Density") -> go.Figure:
+def plot_density_interactive(
+    strikes: Iterable[float],
+    density: Iterable[float],
+    *,
+    title: str = "Risk‑Neutral Density",
+) -> go.Figure:
     """Create an interactive Plotly figure of the risk‑neutral density.
 
     This stub defines the interface for generating an interactive Plotly

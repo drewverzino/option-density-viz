@@ -1,4 +1,5 @@
 """Risk-neutral density extraction: BL, CDF/quantiles."""
+
 try:
     from .bl import bl_density
 except Exception:
@@ -8,4 +9,4 @@ try:
 except Exception:
     pass
 
-__all__ = [n for n in ["bl_density","cdf","inv_cdf"] if n in globals()]
+__all__ = [n for n in ["bl_density", "cdf", "inv_cdf"] if n in globals()]

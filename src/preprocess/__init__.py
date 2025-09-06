@@ -17,8 +17,13 @@ except Exception:
     pass
 
 __all__ = [
-    name for name in [
-        "compute_mid", "synthesize_leg", "pcp_residuals",
-        "forward_price", "log_moneyness",
-    ] if name in globals()
+    name
+    for name in [
+        "compute_mid",
+        "synthesize_leg",
+        "pcp_residuals",
+        "forward_price",
+        "log_moneyness",
+    ]
+    if name in globals()
 ]

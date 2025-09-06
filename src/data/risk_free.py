@@ -26,9 +26,9 @@ import pandas as pd
 @dataclass
 class RiskFreeConfig:
     sofr_csv_path: Optional[Path] = None  # path to local SOFR CSV (optional)
-    default_rate: float = 0.05            # constant fallback when CSV missing/out-of-range
-    forward_fill: bool = True             # fill non-business days using prior value
-    cache: bool = True                    # reserved for future (e.g., memoization)
+    default_rate: float = 0.05  # constant fallback when CSV missing/out-of-range
+    forward_fill: bool = True  # fill non-business days using prior value
+    cache: bool = True  # reserved for future (e.g., memoization)
 
 
 class RiskFreeProvider:
@@ -55,7 +55,13 @@ class RiskFreeProvider:
             if self.config.forward_fill:
                 # Build a continuous daily index and forward-fill missing dates
                 idx = pd.date_range(df["date"].min(), df["date"].max(), freq="D").date
-                df = df.set_index("date").reindex(idx).ffill().rename_axis("date").reset_index()
+                df = (
+                    df.set_index("date")
+                    .reindex(idx)
+                    .ffill()
+                    .rename_axis("date")
+                    .reset_index()
+                )
 
             self._df = df
 

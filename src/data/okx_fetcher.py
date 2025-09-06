@@ -34,10 +34,13 @@ from .base import OptionFetcher, OptionChain, OptionQuote
 load_dotenv()
 
 # Demo/simulated trading: some accounts require this header for private endpoints
-SIM_ENV = (os.getenv("OKX_SIMULATED") or os.getenv("OKX_USE_TESTNET") or "false").lower() in ("1", "true", "yes")
+SIM_ENV = (
+    os.getenv("OKX_SIMULATED") or os.getenv("OKX_USE_TESTNET") or "false"
+).lower() in ("1", "true", "yes")
 
 
 # ------------------------ small helpers ------------------------
+
 
 def _to_float(x):
     """Convert to float or None when unavailable/bad."""
@@ -76,10 +79,13 @@ def _parse_expiry_token(token: str) -> datetime:
 
 def _okx_token_for(expiry_dt: datetime, prefer_short: bool = True) -> str:
     """Generate an OKX-style expiry token; OKX commonly uses YYMMDD."""
-    return expiry_dt.strftime("%y%m%d") if prefer_short else expiry_dt.strftime("%Y%m%d")
+    return (
+        expiry_dt.strftime("%y%m%d") if prefer_short else expiry_dt.strftime("%Y%m%d")
+    )
 
 
 # ------------------------ fetcher ------------------------
+
 
 class OKXFetcher(OptionFetcher):
     """
@@ -101,11 +107,15 @@ class OKXFetcher(OptionFetcher):
         quote_ccy: str = "USDT",
         timeout: float = 15.0,
     ):
-        self.BASE = "https://www.okx.com"  # OKX uses one base URL; demo is an account flag
+        self.BASE = (
+            "https://www.okx.com"  # OKX uses one base URL; demo is an account flag
+        )
 
         # Credentials (optional; required only for private endpoints)
         self.api_key = api_key or os.getenv("OKX_API_KEY")
-        self.api_secret_bytes = (api_secret or os.getenv("OKX_API_SECRET") or "").encode()
+        self.api_secret_bytes = (
+            api_secret or os.getenv("OKX_API_SECRET") or ""
+        ).encode()
         self.passphrase = passphrase or os.getenv("OKX_API_PASSPHRASE")
 
         # Cosmetic labels for the normalized quotes
@@ -122,7 +132,9 @@ class OKXFetcher(OptionFetcher):
         Return a sorted list of expiry dates available for the given underlying (BTC, ETH, ...).
         """
         insts = await self._get_instruments(underlying)
-        exps = sorted({_parse_expiry_token(_expiry_token_from_instid(i["instId"])) for i in insts})
+        exps = sorted(
+            {_parse_expiry_token(_expiry_token_from_instid(i["instId"])) for i in insts}
+        )
         return exps
 
     async def fetch_chain(self, underlying: str, expiry: datetime) -> OptionChain:
@@ -137,7 +149,9 @@ class OKXFetcher(OptionFetcher):
 
         # Filter instruments by expiry token (OKX typically uses YYMMDD)
         target_token = _okx_token_for(expiry, prefer_short=True)
-        insts = [i for i in insts if _expiry_token_from_instid(i["instId"]) == target_token]
+        insts = [
+            i for i in insts if _expiry_token_from_instid(i["instId"]) == target_token
+        ]
 
         # Fetch per-instrument tickers and assemble a map
         symbols = [i["instId"] for i in insts]
@@ -162,7 +176,7 @@ class OKXFetcher(OptionFetcher):
                     mark=_to_float(tk.get("markPx")),
                     volume=_to_float(tk.get("vol24h")),
                     open_interest=None,  # available via separate endpoints if needed
-                    contract_size=1.0,   # OKX options multiplier is effectively 1 underlying unit
+                    contract_size=1.0,  # OKX options multiplier is effectively 1 underlying unit
                     underlying_ccy=self.underlying_ccy,
                     quote_ccy=self.quote_ccy,
                     is_inverse=False,
@@ -201,7 +215,9 @@ class OKXFetcher(OptionFetcher):
         """
         out: Dict[str, Dict] = {}
         for sym in inst_ids:
-            r = await self.client.get(f"{self.BASE}/api/v5/market/ticker", params={"instId": sym})
+            r = await self.client.get(
+                f"{self.BASE}/api/v5/market/ticker", params={"instId": sym}
+            )
             if r.status_code == 200:
                 d = r.json().get("data", [])
                 if d:
@@ -214,7 +230,10 @@ class OKXFetcher(OptionFetcher):
         Use OKX index price (e.g., BTC-USD) as a spot proxy:
             GET /api/v5/market/index-tickers?instId=BTC-USD
         """
-        r = await self.client.get(f"{self.BASE}/api/v5/market/index-tickers", params={"instId": f"{underlying}-USD"})
+        r = await self.client.get(
+            f"{self.BASE}/api/v5/market/index-tickers",
+            params={"instId": f"{underlying}-USD"},
+        )
         if r.status_code == 200 and r.json().get("data"):
             return _to_float(r.json()["data"][0].get("idxPx"))
         return None
@@ -284,7 +303,9 @@ class OKXFetcher(OptionFetcher):
         the error body for actionable debugging on HTTP errors.
         """
         if not self._has_creds():
-            raise RuntimeError("OKX credentials not set. Provide env vars or pass into OKXFetcher().")
+            raise RuntimeError(
+                "OKX credentials not set. Provide env vars or pass into OKXFetcher()."
+            )
         ts = await self._get_server_time_iso()
         query = ""
         if params:
@@ -302,7 +323,9 @@ class OKXFetcher(OptionFetcher):
     async def _private_post(self, path: str, payload: Dict) -> Dict:
         """Signed POST request (not currently used in this project)."""
         if not self._has_creds():
-            raise RuntimeError("OKX credentials not set. Provide env vars or pass into OKXFetcher().")
+            raise RuntimeError(
+                "OKX credentials not set. Provide env vars or pass into OKXFetcher()."
+            )
         ts = await self._get_server_time_iso()
         body = json.dumps(payload)
         sign = self._sign(ts, "POST", path, body)

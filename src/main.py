@@ -41,11 +41,26 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     Returns:
         Namespace of parsed arguments.
     """
-    parser = argparse.ArgumentParser(description="Compute and plot risk‑neutral densities from Deribit option data.")
-    parser.add_argument("--asset", required=True, help="Underlying asset symbol (e.g. BTC, ETH)")
-    parser.add_argument("--expiry", required=True, help="Option expiry date (YYYY-MM-DD)")
-    parser.add_argument("--method", default="bl", choices=["bl", "cos"], help="Density estimation method: 'bl' for Breeden-Litzenberger, 'cos' for COS method")
-    parser.add_argument("--log", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    parser = argparse.ArgumentParser(
+        description="Compute and plot risk‑neutral densities from Deribit option data."
+    )
+    parser.add_argument(
+        "--asset", required=True, help="Underlying asset symbol (e.g. BTC, ETH)"
+    )
+    parser.add_argument(
+        "--expiry", required=True, help="Option expiry date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--method",
+        default="bl",
+        choices=["bl", "cos"],
+        help="Density estimation method: 'bl' for Breeden-Litzenberger, 'cos' for COS method",
+    )
+    parser.add_argument(
+        "--log",
+        default="INFO",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
     return parser.parse_args(args)
 
 

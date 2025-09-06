@@ -25,6 +25,7 @@ from .base import OptionChain, OptionQuote
 
 # ----------------- DataFrame conversion -----------------
 
+
 def chain_to_dataframe(chain: OptionChain) -> pd.DataFrame:
     """
     Flatten an OptionChain into a tidy DataFrame.
@@ -40,7 +41,7 @@ def chain_to_dataframe(chain: OptionChain) -> pd.DataFrame:
                 "symbol": q.symbol,
                 "underlying": q.underlying,
                 "asset_class": q.asset_class,
-                "expiry": q.expiry,              # keep tz info if present
+                "expiry": q.expiry,  # keep tz info if present
                 "strike": q.strike,
                 "type": q.opt_type,
                 "bid": q.bid,
@@ -53,7 +54,9 @@ def chain_to_dataframe(chain: OptionChain) -> pd.DataFrame:
                 "underlying_ccy": q.underlying_ccy,
                 "quote_ccy": q.quote_ccy,
                 "is_inverse": q.is_inverse,
-                "iv": (q.extra or {}).get("iv", None),  # IV is optional and backend-dependent
+                "iv": (q.extra or {}).get(
+                    "iv", None
+                ),  # IV is optional and backend-dependent
             }
         )
     df = pd.DataFrame(rows)
@@ -123,15 +126,19 @@ def dataframe_to_chain(df: pd.DataFrame) -> OptionChain:
 def _nan_to_none(x):
     """Coerce NaN/None to None; keep numeric types as float when possible."""
     import math
+
     try:
-        return None if x is None or (isinstance(x, float) and math.isnan(x)) else (
-            float(x) if isinstance(x, (int, float)) else x
+        return (
+            None
+            if x is None or (isinstance(x, float) and math.isnan(x))
+            else (float(x) if isinstance(x, (int, float)) else x)
         )
     except Exception:
         return None
 
 
 # ----------------- CSV / Parquet I/O -----------------
+
 
 def save_chain_csv(path: str | Path, chain: OptionChain) -> None:
     """Write a chain to CSV; parents are created if missing."""
@@ -173,6 +180,7 @@ def load_chain_parquet(path: str | Path) -> OptionChain:
 
 
 # ----------------- Batch helpers -----------------
+
 
 def load_chains_csv(paths: Iterable[str | Path]) -> List[OptionChain]:
     """Load multiple CSV chains into memory."""

@@ -13,7 +13,9 @@ import numpy as np
 from typing import Iterable, Tuple
 
 
-def breeden_litzenberger(k: np.ndarray, call_prices: np.ndarray, r: float, T: float) -> np.ndarray:
+def breeden_litzenberger(
+    k: np.ndarray, call_prices: np.ndarray, r: float, T: float
+) -> np.ndarray:
     """Compute the risk‑neutral density via the Breeden–Litzenberger formula.
 
     This stub defines the interface for deriving the risk‑neutral probability
@@ -38,7 +40,9 @@ def breeden_litzenberger(k: np.ndarray, call_prices: np.ndarray, r: float, T: fl
     )
 
 
-def cos_density(characteristic_func, x: np.ndarray, N: int, a: float, b: float) -> np.ndarray:
+def cos_density(
+    characteristic_func, x: np.ndarray, N: int, a: float, b: float
+) -> np.ndarray:
     """Compute the density using the COS method.
 
     This stub outlines the COS method for inverting a characteristic

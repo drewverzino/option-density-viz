@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable, Optional
 @dataclass
 class CacheConfig:
     path: Path = Path(".cache/sqlite_cache.db")  # single-file sqlite DB
-    ensure_dirs: bool = True                     # create parent folder if missing
+    ensure_dirs: bool = True  # create parent folder if missing
 
 
 class KVCache:

@@ -1,4 +1,5 @@
 """Volatility modeling: SVI calibration, no-arb checks, surfaces."""
+
 try:
     from .svi import fit_svi  # or your function/class names
 except Exception:
@@ -12,4 +13,8 @@ try:
 except Exception:
     pass
 
-__all__ = [n for n in ["fit_svi","check_butterfly","check_calendar","get_iv"] if n in globals()]
+__all__ = [
+    n
+    for n in ["fit_svi", "check_butterfly", "check_calendar", "get_iv"]
+    if n in globals()
+]
