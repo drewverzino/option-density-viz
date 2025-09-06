@@ -50,7 +50,7 @@ option-density-viz/
 │   ├── density/            # (Roadmap) BL finite diffs, COS method
 │   └── viz/                # Plots and (planned) Streamlit dashboard
 │── notebooks/
-│   └── OptionViz_Data_Tests.ipynb  # End-to-end data validation & demos
+│   └── data_test.ipynb     # End-to-end data validation & demos
 │── docs/                   # Images, examples, extended documentation
 │── requirements.txt        # Python dependencies
 │── README.md               # Project overview
