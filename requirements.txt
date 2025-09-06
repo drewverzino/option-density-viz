@@ -22,5 +22,6 @@ pytest>=8.0
 pytest-asyncio>=0.23
 black>=24.0
 flake8>=7.0
+flake8[jupyter]
 mypy>=1.8
 nbformat>=5.10            # for notebook generation scripts
