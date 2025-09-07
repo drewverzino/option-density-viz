@@ -20,17 +20,23 @@ import numpy as np
 import pandas as pd
 
 
-def synth_put_from_call(S: float, K: float, r: float, T: float, call: float, q: float = 0.0) -> float:
+def synth_put_from_call(
+    S: float, K: float, r: float, T: float, call: float, q: float = 0.0
+) -> float:
     """P = C + K e^{-rT} - S e^{-qT}"""
     return float(call + K * np.exp(-r * T) - S * np.exp(-q * T))
 
 
-def synth_call_from_put(S: float, K: float, r: float, T: float, put: float, q: float = 0.0) -> float:
+def synth_call_from_put(
+    S: float, K: float, r: float, T: float, put: float, q: float = 0.0
+) -> float:
     """C = P + S e^{-qT} - K e^{-rT}"""
     return float(put + S * np.exp(-q * T) - K * np.exp(-r * T))
 
 
-def pcp_residual(S: float, K: float, r: float, T: float, call: float, put: float, q: float = 0.0) -> float:
+def pcp_residual(
+    S: float, K: float, r: float, T: float, call: float, put: float, q: float = 0.0
+) -> float:
     """
     Residual of parity: C + K e^{-rT} - (P + S e^{-qT})
     - Zero means exact parity.
@@ -55,13 +61,21 @@ def pivot_calls_puts_by_strike(
 
     d = df[[strike_col, type_col, price_col]].copy()
     d = d.dropna(subset=[price_col])
-    wide = d.pivot_table(index=strike_col, columns=type_col, values=price_col, aggfunc="mean")
+    wide = d.pivot_table(
+        index=strike_col, columns=type_col, values=price_col, aggfunc="mean"
+    )
     # Normalize column labels to 'C'/'P' if present
     cols = {c: c for c in wide.columns}
-    if "call" in cols: cols["call"] = "C"
-    if "put" in cols: cols["put"] = "P"
+    if "call" in cols:
+        cols["call"] = "C"
+    if "put" in cols:
+        cols["put"] = "P"
     wide = wide.rename(columns=cols)
-    return wide.dropna(subset=["C", "P"], how="any") if set(["C","P"]).issubset(wide.columns) else pd.DataFrame(columns=["C","P"])
+    return (
+        wide.dropna(subset=["C", "P"], how="any")
+        if set(["C", "P"]).issubset(wide.columns)
+        else pd.DataFrame(columns=["C", "P"])
+    )
 
 
 def add_pcp_diagnostics(
@@ -81,7 +95,9 @@ def add_pcp_diagnostics(
 
     Useful to visualize violations and synthesize missing legs.
     """
-    wide = pivot_calls_puts_by_strike(df_quotes, price_col=price_col, type_col=type_col, strike_col=strike_col)
+    wide = pivot_calls_puts_by_strike(
+        df_quotes, price_col=price_col, type_col=type_col, strike_col=strike_col
+    )
     if wide.empty:
         return wide
 

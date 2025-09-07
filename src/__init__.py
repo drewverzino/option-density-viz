@@ -25,9 +25,13 @@ Notes
 
 __all__ = [
     # Top-level types
-    "OptionQuote", "OptionChain", "OptionFetcher",
+    "OptionQuote",
+    "OptionChain",
+    "OptionFetcher",
     # Factory / providers
-    "get_fetcher", "RiskFreeProvider", "RiskFreeConfig",
+    "get_fetcher",
+    "RiskFreeProvider",
+    "RiskFreeConfig",
     # Preprocess convenience
     "preprocess",
 ]
@@ -43,8 +47,10 @@ except Exception:  # pragma: no cover - guard for partial installs
 try:
     from data.registry import get_fetcher
 except Exception:  # pragma: no cover
+
     def get_fetcher(*args, **kwargs):  # type: ignore
         raise ImportError("data.registry.get_fetcher is not available on PYTHONPATH")
+
 
 # Risk-free provider
 try:

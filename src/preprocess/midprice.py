@@ -89,8 +89,8 @@ def add_midprice_columns(
     # Mid computation
     mid = ((bid + ask) / 2).where(both)
     mid = mid.where(mid > 0)  # non-positive mids -> NaN
-    mid = mid.where(~mid.isna(), bid)   # fallback to bid
-    mid = mid.where(~mid.isna(), ask)   # fallback to ask
+    mid = mid.where(~mid.isna(), bid)  # fallback to bid
+    mid = mid.where(~mid.isna(), ask)  # fallback to ask
 
     # Relative spread (use mid only when both sides exist and mid>0)
     rel_spread = (spread / mid).where(both & mid.gt(0))
