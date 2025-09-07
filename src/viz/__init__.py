@@ -1,7 +1,7 @@
 """Plotting helpers and Streamlit dashboard."""
 
 try:
-    from .plots import plot_smile, plot_density
+    from .plots import plot_density, plot_smile
 except Exception:
     pass
 

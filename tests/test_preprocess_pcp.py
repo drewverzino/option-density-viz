@@ -1,10 +1,11 @@
 import numpy as np
 import pandas as pd
+
 from preprocess.pcp import (
-    synth_put_from_call,
-    synth_call_from_put,
-    pcp_residual,
     add_pcp_diagnostics,
+    pcp_residual,
+    synth_call_from_put,
+    synth_put_from_call,
 )
 
 
@@ -39,6 +40,8 @@ def test_pcp_dataframe_helpers():
         type_col="type",
         strike_col="strike",
     )
-    assert set(["C", "P", "residual", "put_synth", "call_synth"]).issubset(diag.columns)
+    assert set(["C", "P", "residual", "put_synth", "call_synth"]).issubset(
+        diag.columns
+    )
     # Residuals should be ~0 (numerical noise)
     assert np.allclose(diag["residual"].to_numpy(), 0.0, atol=1e-12)

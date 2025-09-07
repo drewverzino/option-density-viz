@@ -16,8 +16,9 @@ Design choices:
 - We leave original columns untouched and return a new DataFrame.
 """
 
-from typing import Literal, Optional
 import math
+from typing import Literal, Optional
+
 import pandas as pd
 
 

@@ -20,14 +20,17 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import yfinance as yf
-from .base import OptionFetcher, OptionChain, OptionQuote
+
+from .base import OptionChain, OptionFetcher, OptionQuote
 
 
 def _nan_to_none(x):
     """Coerce NaN to None; keep floats as floats."""
     try:
         return (
-            None if x is None or (isinstance(x, float) and math.isnan(x)) else float(x)
+            None
+            if x is None or (isinstance(x, float) and math.isnan(x))
+            else float(x)
         )
     except Exception:
         return None
@@ -47,9 +50,14 @@ class YFinanceFetcher(OptionFetcher):
             return yf.Ticker(underlying).options  # list[str] like "2025-12-19"
 
         dates = await asyncio.to_thread(_get)
-        return [datetime.fromisoformat(d).replace(tzinfo=timezone.utc) for d in dates]
+        return [
+            datetime.fromisoformat(d).replace(tzinfo=timezone.utc)
+            for d in dates
+        ]
 
-    async def fetch_chain(self, underlying: str, expiry: datetime) -> OptionChain:
+    async def fetch_chain(
+        self, underlying: str, expiry: datetime
+    ) -> OptionChain:
         """
         Fetch calls/puts for one expiry and return a normalized OptionChain.
 

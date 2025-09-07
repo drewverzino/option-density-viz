@@ -9,8 +9,9 @@ option prices and return approximations to the underlying density.
 
 from __future__ import annotations
 
-import numpy as np
 from typing import Iterable, Tuple
+
+import numpy as np
 
 
 def breeden_litzenberger(

@@ -23,13 +23,13 @@ import sys
 from datetime import datetime
 from typing import List
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from .data import fetch_instruments, fetch_ticker
-from .vol import calibrate_svi, svi_total_variance, SVIParameters
 from .density import breeden_litzenberger
 from .viz import plot_density
+from .vol import SVIParameters, calibrate_svi, svi_total_variance
 
 
 def parse_args(args: List[str]) -> argparse.Namespace:
@@ -45,7 +45,9 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         description="Compute and plot risk‑neutral densities from Deribit option data."
     )
     parser.add_argument(
-        "--asset", required=True, help="Underlying asset symbol (e.g. BTC, ETH)"
+        "--asset",
+        required=True,
+        help="Underlying asset symbol (e.g. BTC, ETH)",
     )
     parser.add_argument(
         "--expiry", required=True, help="Option expiry date (YYYY-MM-DD)"

@@ -11,12 +11,15 @@ Why a registry:
 """
 
 from typing import Literal
+
 from .base import OptionFetcher
-from .yf_fetcher import YFinanceFetcher
 from .okx_fetcher import OKXFetcher
+from .yf_fetcher import YFinanceFetcher
 
 
-def get_fetcher(asset_class: Literal["equity", "crypto"], **kwargs) -> OptionFetcher:
+def get_fetcher(
+    asset_class: Literal["equity", "crypto"], **kwargs
+) -> OptionFetcher:
     """
     Return a concrete fetcher.
 

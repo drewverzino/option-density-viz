@@ -60,10 +60,15 @@ def estimate_forward_from_chain(
     from .pcp import pivot_calls_puts_by_strike  # local import to avoid cycles
 
     wide = pivot_calls_puts_by_strike(
-        df_quotes, price_col=price_col, type_col=type_col, strike_col=strike_col
+        df_quotes,
+        price_col=price_col,
+        type_col=type_col,
+        strike_col=strike_col,
     )
     if wide.empty:
-        raise ValueError("Not enough quotes to estimate forward (no C/P pairs).")
+        raise ValueError(
+            "Not enough quotes to estimate forward (no C/P pairs)."
+        )
 
     # Base F_i per strike
     disc_r = np.exp(r * T)

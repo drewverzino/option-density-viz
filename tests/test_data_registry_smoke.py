@@ -1,8 +1,9 @@
 import os
+
 import pytest
 
-from data.registry import get_fetcher
 from data.okx_fetcher import OKXFetcher
+from data.registry import get_fetcher
 from data.yf_fetcher import YFinanceFetcher
 
 
@@ -12,7 +13,9 @@ def test_get_fetcher_types():
     assert isinstance(f_eq, YFinanceFetcher.__class__) or isinstance(
         f_eq, YFinanceFetcher
     )
-    assert isinstance(f_cr, OKXFetcher.__class__) or isinstance(f_cr, OKXFetcher)
+    assert isinstance(f_cr, OKXFetcher.__class__) or isinstance(
+        f_cr, OKXFetcher
+    )
 
 
 @pytest.mark.skipif(

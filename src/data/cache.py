@@ -129,7 +129,9 @@ class KVCache:
     def _get_disk(self, key: str, now: float) -> Optional[Any]:
         """Return a value from disk if fresh; otherwise delete and return None."""
         with sqlite3.connect(self.config.path) as con:
-            cur = con.execute("SELECT v, expires_at FROM kv WHERE k = ?;", (key,))
+            cur = con.execute(
+                "SELECT v, expires_at FROM kv WHERE k = ?;", (key,)
+            )
             row = cur.fetchone()
             if not row:
                 return None
@@ -141,7 +143,9 @@ class KVCache:
                 return None
             return pickle.loads(v_blob)
 
-    def _set_disk(self, key: str, pickled_value: bytes, expires_at: float) -> None:
+    def _set_disk(
+        self, key: str, pickled_value: bytes, expires_at: float
+    ) -> None:
         with sqlite3.connect(self.config.path) as con:
             con.execute(
                 "REPLACE INTO kv (k, v, expires_at) VALUES (?, ?, ?);",

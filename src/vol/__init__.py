@@ -1,15 +1,14 @@
-"""Volatility surface fitting for option-density-viz.
+# src/vol/__init__.py
+"""Volatility modeling utilities (SVI and diagnostics)."""
 
-The ``vol`` subpackage contains functions and classes for fitting
-implied volatility smiles and surfaces. Currently, it provides
-an implementation of the Stochastic Volatility Inspired (SVI) model
-following the parameterization introduced by Gatheral (2011).
-"""
-
-from .svi import svi_total_variance, calibrate_svi, SVIParameters
+from .no_arb import butterfly_violations, calendar_violations  # noqa: F401
+from .svi import SVIFit, fit_svi, prepare_smile_data, svi_w  # noqa: F401
 
 __all__ = [
-    "SVIParameters",
-    "svi_total_variance",
-    "calibrate_svi",
+    "SVIFit",
+    "svi_w",
+    "fit_svi",
+    "prepare_smile_data",
+    "butterfly_violations",
+    "calendar_violations",
 ]

@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "option-density-viz"
+version = "0.1.0"
+description = "Risk-neutral density and volatility smile tooling for crypto & equity options (Option Viz)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Drew Verzino" }
+]
+keywords = ["options", "volatility", "svi", "risk-neutral density", "quant", "finance"]
+
+dependencies = [
+  "numpy>=1.23",
+  "pandas>=2.0",
+  "scipy>=1.10",
+  "httpx>=0.27",
+  "yfinance>=0.2",
+  "python-dotenv>=1.0",
+  "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "pytest-asyncio>=0.23",
+  "flake8>=6.0",
+  "black>=23.9.1",
+  "isort>=5.12",
+  "mypy>=1.6",
+]
+notebook = [
+  "jupyter>=1.0",
+  "ipykernel>=6.25",
+  "nest-asyncio>=1.5",
+]
+parquet = [
+  "pyarrow>=12.0",
+  "fastparquet>=2023.7.0",
+]
+plotly = [
+  "plotly>=5.18",
+]
+
+[project.urls]
+Homepage = "https://github.com/drewverzino/option-density-viz"
+Repository = "https://github.com/drewverzino/option-density-viz"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests", "notebooks", "docs", "out"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 79
+target-version = ["py310"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 79
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.flake8]
+max-line-length = 79
+extend-ignore = ["E203", "W503"]
+exclude = ["venv", ".venv", ".git", "__pycache__", "build", "dist", "out"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = false
+warn_unreachable = true
+pretty = true

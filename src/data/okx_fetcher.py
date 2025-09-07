@@ -16,19 +16,19 @@ Important:
 - For research, a read-only key is sufficient.
 """
 
-import os
-import hmac
-import base64
-import json
 import asyncio
-from hashlib import sha256
-from typing import List, Dict, Optional, Tuple
+import base64
+import hmac
+import json
+import os
 from datetime import datetime, timezone
+from hashlib import sha256
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from dotenv import load_dotenv
 
-from .base import OptionFetcher, OptionChain, OptionQuote
+from .base import OptionChain, OptionFetcher, OptionQuote
 
 # Load .env for optional private credentials (OKX_API_KEY/SECRET/PASSPHRASE)
 load_dotenv()
@@ -80,7 +80,9 @@ def _parse_expiry_token(token: str) -> datetime:
 def _okx_token_for(expiry_dt: datetime, prefer_short: bool = True) -> str:
     """Generate an OKX-style expiry token; OKX commonly uses YYMMDD."""
     return (
-        expiry_dt.strftime("%y%m%d") if prefer_short else expiry_dt.strftime("%Y%m%d")
+        expiry_dt.strftime("%y%m%d")
+        if prefer_short
+        else expiry_dt.strftime("%Y%m%d")
     )
 
 
@@ -107,9 +109,7 @@ class OKXFetcher(OptionFetcher):
         quote_ccy: str = "USDT",
         timeout: float = 15.0,
     ):
-        self.BASE = (
-            "https://www.okx.com"  # OKX uses one base URL; demo is an account flag
-        )
+        self.BASE = "https://www.okx.com"  # OKX uses one base URL; demo is an account flag
 
         # Credentials (optional; required only for private endpoints)
         self.api_key = api_key or os.getenv("OKX_API_KEY")
@@ -133,11 +133,16 @@ class OKXFetcher(OptionFetcher):
         """
         insts = await self._get_instruments(underlying)
         exps = sorted(
-            {_parse_expiry_token(_expiry_token_from_instid(i["instId"])) for i in insts}
+            {
+                _parse_expiry_token(_expiry_token_from_instid(i["instId"]))
+                for i in insts
+            }
         )
         return exps
 
-    async def fetch_chain(self, underlying: str, expiry: datetime) -> OptionChain:
+    async def fetch_chain(
+        self, underlying: str, expiry: datetime
+    ) -> OptionChain:
         """
         Fetch all options for a specific expiry and return a normalized OptionChain.
 
@@ -150,7 +155,9 @@ class OKXFetcher(OptionFetcher):
         # Filter instruments by expiry token (OKX typically uses YYMMDD)
         target_token = _okx_token_for(expiry, prefer_short=True)
         insts = [
-            i for i in insts if _expiry_token_from_instid(i["instId"]) == target_token
+            i
+            for i in insts
+            if _expiry_token_from_instid(i["instId"]) == target_token
         ]
 
         # Fetch per-instrument tickers and assemble a map
@@ -201,7 +208,9 @@ class OKXFetcher(OptionFetcher):
         """
         uly = f"{underlying}-USD"
         url = f"{self.BASE}/api/v5/public/instruments"
-        r = await self.client.get(url, params={"instType": "OPTION", "uly": uly})
+        r = await self.client.get(
+            url, params={"instType": "OPTION", "uly": uly}
+        )
         r.raise_for_status()
         return r.json().get("data", [])
 
@@ -259,7 +268,9 @@ class OKXFetcher(OptionFetcher):
         Fallback to local UTC if the time endpoint fails.
         """
         try:
-            r = await self.client.get(f"{self.BASE}/api/v5/public/time", timeout=5.0)
+            r = await self.client.get(
+                f"{self.BASE}/api/v5/public/time", timeout=5.0
+            )
             r.raise_for_status()
             # Payload example: {"code":"0","data":[{"ts":"1725600000000"}],"msg":""}
             ts_ms = int(r.json()["data"][0]["ts"])
@@ -297,7 +308,9 @@ class OKXFetcher(OptionFetcher):
             headers["x-simulated-trading"] = "1"
         return headers
 
-    async def _private_get(self, path: str, params: Optional[Dict] = None) -> Dict:
+    async def _private_get(
+        self, path: str, params: Optional[Dict] = None
+    ) -> Dict:
         """
         Signed GET request. Raises RuntimeError if credentials are missing and prints
         the error body for actionable debugging on HTTP errors.
@@ -341,7 +354,9 @@ class OKXFetcher(OptionFetcher):
     async def get_balance(self, ccy: Optional[str] = None) -> Dict:
         """GET /api/v5/account/balance (optionally filter by 'ccy')."""
         params = {"ccy": ccy} if ccy else None
-        return await self._private_get("/api/v5/account/balance", params=params)
+        return await self._private_get(
+            "/api/v5/account/balance", params=params
+        )
 
     async def aclose(self):
         """Close the underlying HTTP client (good hygiene for long tests)."""

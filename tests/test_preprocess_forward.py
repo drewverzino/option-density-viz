@@ -1,6 +1,11 @@
 import numpy as np
 import pandas as pd
-from preprocess.forward import forward_price, log_moneyness, estimate_forward_from_chain
+
+from preprocess.forward import (
+    estimate_forward_from_chain,
+    forward_price,
+    log_moneyness,
+)
 
 
 def test_forward_price_and_k():
@@ -24,7 +29,13 @@ def test_estimate_forward_from_chain():
         rows.append({"strike": K, "type": "P", "mid": P, "rel_spread": 0.05})
     df = pd.DataFrame(rows)
     F_est = estimate_forward_from_chain(
-        df, r=r, T=T, price_col="mid", strike_col="strike", type_col="type", spot_hint=S
+        df,
+        r=r,
+        T=T,
+        price_col="mid",
+        strike_col="strike",
+        type_col="type",
+        spot_hint=S,
     )
     # True forward
     F_true = S * np.exp(r * T)

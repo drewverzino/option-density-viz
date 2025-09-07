@@ -16,6 +16,7 @@ Assumptions:
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -35,7 +36,13 @@ def synth_call_from_put(
 
 
 def pcp_residual(
-    S: float, K: float, r: float, T: float, call: float, put: float, q: float = 0.0
+    S: float,
+    K: float,
+    r: float,
+    T: float,
+    call: float,
+    put: float,
+    q: float = 0.0,
 ) -> float:
     """
     Residual of parity: C + K e^{-rT} - (P + S e^{-qT})
@@ -57,7 +64,9 @@ def pivot_calls_puts_by_strike(
     Rows require both legs to compute residuals.
     """
     if type_col not in df or strike_col not in df or price_col not in df:
-        raise ValueError("DataFrame must contain type, strike, and price columns")
+        raise ValueError(
+            "DataFrame must contain type, strike, and price columns"
+        )
 
     d = df[[strike_col, type_col, price_col]].copy()
     d = d.dropna(subset=[price_col])
@@ -96,7 +105,10 @@ def add_pcp_diagnostics(
     Useful to visualize violations and synthesize missing legs.
     """
     wide = pivot_calls_puts_by_strike(
-        df_quotes, price_col=price_col, type_col=type_col, strike_col=strike_col
+        df_quotes,
+        price_col=price_col,
+        type_col=type_col,
+        strike_col=strike_col,
     )
     if wide.empty:
         return wide

@@ -1,14 +1,18 @@
 from datetime import datetime
+
 import pandas as pd
 
-from data.risk_free import RiskFreeProvider, RiskFreeConfig
+from data.risk_free import RiskFreeConfig, RiskFreeProvider
 
 
 def test_risk_free_with_csv(tmp_path):
     # Make a tiny SOFR CSV
     p = tmp_path / "sofr.csv"
     df = pd.DataFrame(
-        {"date": pd.to_datetime(["2025-01-01", "2025-01-02"]), "rate": [0.05, 0.052]}
+        {
+            "date": pd.to_datetime(["2025-01-01", "2025-01-02"]),
+            "rate": [0.05, 0.052],
+        }
     )
     df.to_csv(p, index=False)
 

@@ -40,7 +40,7 @@ __version__ = "0.1.0"
 
 # Re-export core data types & factory
 try:
-    from data.base import OptionQuote, OptionChain, OptionFetcher
+    from data.base import OptionChain, OptionFetcher, OptionQuote
 except Exception:  # pragma: no cover - guard for partial installs
     OptionQuote = OptionChain = OptionFetcher = None  # type: ignore
 
@@ -49,12 +49,14 @@ try:
 except Exception:  # pragma: no cover
 
     def get_fetcher(*args, **kwargs):  # type: ignore
-        raise ImportError("data.registry.get_fetcher is not available on PYTHONPATH")
+        raise ImportError(
+            "data.registry.get_fetcher is not available on PYTHONPATH"
+        )
 
 
 # Risk-free provider
 try:
-    from data.risk_free import RiskFreeProvider, RiskFreeConfig
+    from data.risk_free import RiskFreeConfig, RiskFreeProvider
 except Exception:  # pragma: no cover
     RiskFreeProvider = RiskFreeConfig = None  # type: ignore
 

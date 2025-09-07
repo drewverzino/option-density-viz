@@ -22,7 +22,6 @@ import pandas as pd
 
 from .base import OptionChain, OptionQuote
 
-
 # ----------------- DataFrame conversion -----------------
 
 

@@ -17,7 +17,7 @@ Optional env (for OKX private):
     OKX_SIMULATED=true
 """
 
-from .base import OptionQuote, OptionChain, OptionFetcher
+from .base import OptionChain, OptionFetcher, OptionQuote
 from .registry import get_fetcher
 
 # Import backends defensively so partial checkouts/tests don't break imports
