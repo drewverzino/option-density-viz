@@ -181,7 +181,7 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 
 - **SVI (Stochastic Volatility Inspired)** parameterizes total variance for a fixed $T$:
 
-  $$w(k) = a + b \left\{ \rho (k - m) + \sqrt{ (k - m)^2 + \sigma^2 } \right\}$$
+  $$w(k) = a + b \left\lbrace \rho\,(k - m) + \sqrt{(k - m)^2 + \sigma^2} \right\rbrace$$
 
   Parameters: $a$ (level), $b$ (slope), $\rho$ (skew, $|\rho|<1$), $m$ (shift), $\sigma$ (wing curvature, $>0$).
 - **Why SVI?** It fits empirical smiles well and admits known **sufficient conditions** for (approximate) no‑arbitrage.
