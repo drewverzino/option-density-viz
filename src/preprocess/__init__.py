@@ -1,29 +1,30 @@
-"""Preprocessing utilities: mids, PCP, forward/log-moneyness."""
+# src/preprocess/__init__.py
+"""
+Preprocessing utilities (quote cleaning, parity, forward/log-moneyness).
 
-# Import defensively during development
-try:
-    from .midprice import compute_mid  # adjust to your actual function names
-except Exception:
-    pass
+Public API
+----------
+- add_midprice_columns(df, ...): compute robust mids, rel. spreads, and flags
+- synth_put_from_call(...), synth_call_from_put(...): PCP synthetic legs
+- pcp_residual(...): parity residual (diagnostics)
+- pivot_calls_puts_by_strike(df, ...): C/P wide table by strike
+- add_pcp_diagnostics(df, ...): per-strike residuals + synthetic legs
+- forward_price(...), log_moneyness(...)
+- estimate_forward_from_chain(df, ...): forward from PCP pairs (robust)
+"""
 
-try:
-    from .pcp import synthesize_leg, pcp_residuals
-except Exception:
-    pass
-
-try:
-    from .forward import forward_price, log_moneyness
-except Exception:
-    pass
+from .midprice import add_midprice_columns
+from .pcp import (
+    synth_put_from_call, synth_call_from_put, pcp_residual,
+    pivot_calls_puts_by_strike, add_pcp_diagnostics,
+)
+from .forward import (
+    forward_price, log_moneyness, estimate_forward_from_chain,
+)
 
 __all__ = [
-    name
-    for name in [
-        "compute_mid",
-        "synthesize_leg",
-        "pcp_residuals",
-        "forward_price",
-        "log_moneyness",
-    ]
-    if name in globals()
+    "add_midprice_columns",
+    "synth_put_from_call", "synth_call_from_put", "pcp_residual",
+    "pivot_calls_puts_by_strike", "add_pcp_diagnostics",
+    "forward_price", "log_moneyness", "estimate_forward_from_chain",
 ]
