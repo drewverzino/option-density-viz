@@ -11,11 +11,12 @@ _Risk-neutral probability density visualization from options on **crypto (BTC/ET
 ## 📌 Overview
 
 `option-density-viz` is a research and visualization tool that extracts **risk-neutral probability densities (RNDs)** from options market data.  
-It normalizes live **BTC/ETH** options from the **OKX public API** and **equity** options via **yfinance**, fits (planned) **implied volatility smiles** using an arbitrage-aware **SVI** workflow, then applies the **Breeden–Litzenberger relation** and (planned) **COS method** to compute and plot the probability density of future prices.
+It normalizes live **BTC/ETH** options from the **OKX public API** and **equity** options via **yfinance**, fits **implied volatility smiles** using an arbitrage‑aware **SVI** workflow, stitches a **volatility surface** across maturities, and (next) applies the **Breeden–Litzenberger relation** and **COS method** to compute and plot the probability density of future prices.
 
 This project is designed to help **quantitative researchers, students, and traders** understand how option markets are pricing future outcomes and uncertainty.
 
-> Note: The data layer (OKX + yfinance), caching, rate-limiting/retries, historical I/O, and risk-free rates are implemented. SVI fitting, no-arb checks, and COS/BL pipelines are an active roadmap.
+> Current status: **Data layer, preprocessing, SVI calibration, surface smoothing, and no‑arbitrage diagnostics are implemented.**  
+> The **BL** (finite‑difference) and **COS** (spectral) density pipelines are the next deliverables.
 
 ---
 
@@ -23,12 +24,14 @@ This project is designed to help **quantitative researchers, students, and trade
 
 - 🔗 **Live API ingestion** — pull BTC/ETH option chains from **OKX (public endpoints, no keys required)**, plus equity chains from **yfinance**.
 - 🧱 **Unified schema** — a single `OptionQuote`/`OptionChain` model for crypto and equities.
+- 🧮 **Preprocessing helpers** — robust mids/flags, **PCP diagnostics**, **forward estimation from PCP**.
 - 💾 **Reproducibility** — save/load chains to **CSV/Parquet**; build offline datasets for experiments.
-- 🚦 **Polite data fetching** — **TTL cache** (in-mem + SQLite), **async** calls, **rate-limit** gate + **exponential backoff** retries.
-- 📈 **Implied volatility surface fitting (SVI)** — scaffolding in place; no-arbitrage checks on the roadmap.
-- 🧮 **Risk-neutral density extraction** — via **Breeden–Litzenberger** (second derivative) and **COS** (Fourier) methods (roadmap).
-- 🎨 **Visualization** — Matplotlib plots for smiles/densities; Streamlit dashboard planned.
-- 📊 **Analytics add-ons** — implied mean, skewness, and kurtosis of the distribution (roadmap).
+- 🚦 **Polite data fetching** — **TTL cache** (in‑mem + SQLite), **async** calls, **rate‑limit** gate + **exponential backoff** retries.
+- 📈 **SVI calibration** — vega‑weighted least squares (Black‑76), grid‑seeded **L‑BFGS‑B** with safe bounds.
+- 🧰 **No‑arbitrage checks** — butterfly convexity and calendar monotonicity diagnostics.
+- 🗺 **Surface fitting** — per‑expiry SVI → smoothed parameters across maturities with evaluators `iv(k,T)` / `w(k,T)`.
+- 🎨 **Visualization** — Matplotlib plots for smiles/surfaces now; Streamlit dashboard planned.
+- 📊 **RND extraction (roadmap)** — **Breeden–Litzenberger** (finite differences) and **COS** (Fourier) methods.
 
 ---
 
@@ -46,11 +49,20 @@ option-density-viz/
 │   │   ├── historical_loader.py  # CSV/Parquet save/load
 │   │   ├── risk_free.py    # SOFR CSV loader + constant fallback
 │   │   └── rate_limit.py   # AsyncRateLimiter + retry_with_backoff
-│   ├── vol/                # (Roadmap) SVI fitting, no-arb checks, surfaces
-│   ├── density/            # (Roadmap) BL finite diffs, COS method
+│   ├── preprocess/         # Mids/flags, PCP, forwards & log-moneyness
+│   │   ├── midprice.py     # add_midprice_columns(...)
+│   │   ├── pcp.py          # residuals, synth legs, strike pivot
+│   │   └── forward.py      # forward_price, log_moneyness, PCP forward estimators
+│   ├── vol/                # SVI fitting + no-arb + surfaces
+│   │   ├── svi.py          # SVI (Black-76, vega-weighted LS; L-BFGS-B)
+│   │   ├── no_arb.py       # butterfly/calendar diagnostics
+│   │   └── surface.py      # per-expiry fits → smoothed surface
+│   ├── density/            # (Next) BL finite diffs, COS method
 │   └── viz/                # Plots and (planned) Streamlit dashboard
 │── notebooks/
-│   └── data_test.ipynb     # End-to-end data validation & demos
+│   ├── data_test.ipynb     # End-to-end data validation & demos
+│   ├── SVI_Test.ipynb      # SVI per-expiry + surface + diagnostics
+│   └── Suite_Test.ipynb    # Full suite: data → preprocess → SVI → surface
 │── docs/                   # Images, examples, extended documentation
 │── requirements.txt        # Python dependencies
 │── README.md               # Project overview
@@ -83,16 +95,10 @@ pip install -r requirements.txt
 
 ## 🚀 Usage
 
-Run the **validation notebook** to fetch data, inspect a chain, and export CSV/Parquet:
-
-```text
-notebooks/data_test.ipynb
-```
-
-Or try a minimal script:
+### Quickstart (data only)
 
 ```python
-# examples/quickstart.py
+# examples/quickstart_data.py
 import asyncio
 from data.registry import get_fetcher
 
@@ -113,9 +119,40 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-<!-- Example output:
+### SVI & surface quickstart
 
-![Demo Plot](docs/example_density.png) -->
+```python
+# examples/quickstart_svi.py
+import numpy as np
+from preprocess.midprice import add_midprice_columns
+from preprocess.forward import yearfrac, estimate_forward_from_chain, log_moneyness
+from data.historical_loader import chain_to_dataframe
+from vol.svi import calibrate_svi_from_quotes  # fit per-expiry SVI
+from vol.surface import fit_surface_from_frames  # build surface across expiries
+
+# assume you already fetched a few expiries into {expiry: chain}
+frames = {}
+T_map, F_map, r_map = {}, {}, {}
+for expiry, chain in frames.items():
+    df = add_midprice_columns(chain_to_dataframe(chain))
+    T = yearfrac(chain.asof_utc, expiry)
+    r = 0.0  # or RiskFreeProvider(...).get_rate(chain.asof_utc.date())
+    F = estimate_forward_from_chain(df, r=r, T=T, spot_hint=chain.spot)
+    k = log_moneyness(df["strike"], F)
+
+    # Build (k, w, weight) arrays for SVI
+    # ... (see notebooks/SVI_Test.ipynb for detailed preparation)
+
+# Then build & smooth a surface
+surface = fit_surface_from_frames(frames, T_map, F_map, r_map)
+iv_atm = surface.iv(k=0.0, T=list(T_map.values())[0])
+print("ATM IV at first expiry:", iv_atm)
+```
+
+Or just run the notebooks:
+
+- `notebooks/SVI_Test.ipynb` — SVI per‑expiry, surface smoothing, diagnostics  
+- `notebooks/Suite_Test.ipynb` — data → preprocess → SVI → surface
 
 ---
 
@@ -126,10 +163,11 @@ This section highlights example artifacts and the **metrics** we track to sanity
 ### Artifacts (examples)
 
 - `docs/example_smile_aapl.png` — AAPL IV smile at a recent expiry
-- `docs/example_density_btc.png` — BTC risk‑neutral PDF at a recent expiry
-- `docs/example_cdf_btc.png` — BTC CDF with key quantiles
+- `docs/example_surface_btc.png` — BTC IV surface wireframe
+- `docs/example_density_btc.png` — BTC risk‑neutral PDF at a recent expiry (coming with BL)
+- `docs/example_cdf_btc.png` — BTC CDF with key quantiles (coming with BL/COS)
 
-> Tip: Export plots from the validation notebook and drop the files into `docs/` with short, dated filenames.
+> Tip: Export plots from the notebooks and drop the files into `docs/` with short, dated filenames.
 
 ### Metrics we report
 
@@ -146,13 +184,7 @@ We summarize each snapshot (per expiry) with:
 | Negative pdf rate | Share of grid with pdf < 0 | ≈ 0 |
 | Runtime (s) | Seconds per expiry | Informational |
 
-> Until the modeling modules land, focus results on **data completeness**, **consistency** (PCP/forward checks), and **reproducibility** (CSV/Parquet round‑trips).
-
-### Reproduce these results
-
-1. Run `notebooks/data_test.ipynb` for **AAPL** and **BTC**.  
-2. Export figures to `docs/` (e.g., `example_smile_aapl.png`, `example_density_btc.png`).  
-3. (When modeling modules are added) run the “Report” cell to print/save a metrics table (CSV/JSON) to `docs/results/`.
+> Until the density modules land, focus results on **data completeness**, **SVI fit quality**, **no‑arb diagnostics**, and **reproducibility** (CSV/Parquet round‑trips).
 
 ## 📚 Theory Background
 
@@ -185,7 +217,7 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 
   Parameters: $a$ (level), $b$ (slope), $\rho$ (skew, $|\rho|<1$), $m$ (shift), $\sigma$ (wing curvature, $>0$).
 - **Why SVI?** It fits empirical smiles well and admits known **sufficient conditions** for (approximate) no‑arbitrage.
-- **Calibration tips used/planned**:
+- **Calibration tips used**:
   - **Seeds** from coarse grid / heuristics (ATM slope/curvature).
   - **Vega‑weighted loss** in **total variance** (not IV) to emphasize informative strikes.
   - **Bounds/regularization** on $(a,b,\rho,m,\sigma)$ to avoid pathological wings.
@@ -197,19 +229,19 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 - **Calendar arbitrage:** Total variance should be **non‑decreasing in T** for fixed $k$. We spot‑check adjacent maturities.
 - **Data hygiene:** Filter **crossed** ($bid>ask$) / **wide** spreads and stale quotes; compute robust mids before fitting.
 
-### 5) Breeden–Litzenberger (BL) density (model‑free)
+### 5) Breeden–Litzenberger (BL) density (model‑free; next milestone)
 
 - BL states the **risk‑neutral PDF** is the **second derivative** of the call price with respect to strike (under mild conditions):
 
   $$f_Q(K,T) = \frac{\partial^2C(K,T)}{\partial K^2} \cdot e^{rT}$$
 
-- Numerically fragile → we stabilize by:
+- Numerically fragile → we will stabilize by:
   - Smoothing the **call price curve** in $K$ (e.g., monotone splines / regularized fits).
   - Using **central or higher‑order finite differences** with **adaptive spacing**.
   - Enforcing **boundary behavior** (wing extrapolation consistent with forwards).
-- Diagnostics: $f_Q \geq 0$, $\int f_Q dK \approx 1$, RN mean ≈ forward.
+- Diagnostics: $f_Q \geq 0$, $\int f_Q \mathrm{d}K \approx 1$, RN mean ≈ forward.
 
-### 6) COS method (spectral, model‑driven)
+### 6) COS method (spectral, model‑driven; next)
 
 - **COS** recovers densities/prices from a **characteristic function** via a truncated cosine series on $[a,b]$:
 
@@ -219,7 +251,7 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 - Key practical choices:
   - **Truncation bounds** $[a,b]$ from **cumulants** (match mean/variance/skew/kurtosis).
   - **Series length** $N$ from an error budget (trade speed vs accuracy).
-- COS is extremely fast and stable once $\phi$ is known; we use it to cross‑check BL.
+- COS is extremely fast and stable once $\phi$ is known; we will use it to cross‑check BL.
 
 ### 7) Diagnostics & consistency checks
 
@@ -228,14 +260,11 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 - **Moment checks**: Compare variance/skew/kurtosis from the density to those implied by the smile.
 - **Price‑from‑density**: Re‑integrate the density to recover call prices and measure error.
 
-> In practice, a robust pipeline alternates between **modeling** (SVI/COS) and **model‑free** (BL) views, using diagnostics to decide when to trust which.
-
 ---
 
 ## 🛠 Roadmap
 
-- [ ] SVI calibration with regularization + no-arbitrage checks
-- [ ] BL derivative (high-order finite differences) and COS pipeline
+- [ ] **BL** derivative (high‑order finite differences) and **COS** pipeline
 - [ ] Streamlit dashboard (interactive smiles/densities)
 - [ ] Calibration comparisons (SVI vs SABR)
 - [ ] Additional asset classes (index options like SPX/QQQ)

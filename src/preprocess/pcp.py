@@ -132,3 +132,54 @@ def add_pcp_diagnostics(
         index=wide.index,
     )
     return out.sort_index()
+
+
+def synthesize_missing_leg(
+    S: float,
+    K: float,
+    r: float,
+    T: float,
+    *,
+    call: float | None = None,
+    put: float | None = None,
+    q: float = 0.0,
+) -> tuple[str, float]:
+    """
+    Synthesize the *missing* option leg via put–call parity.
+
+    Exactly one of `call` or `put` must be provided:
+
+      - If `call` is provided and `put` is None → compute and return ('P', P_syn).
+      - If `put` is provided and `call` is None → compute and return ('C', C_syn).
+
+    Parameters
+    ----------
+    S, K, r, T, q : floats
+        Spot, strike, risk-free rate, year fraction, and dividend (or carry) yield.
+    call, put : float or None
+        Provided leg mid. Set the other to None.
+
+    Returns
+    -------
+    (leg, value) : (str, float)
+        'C' or 'P' and the synthesized mid price.
+
+    Raises
+    ------
+    ValueError
+        If both `call` and `put` are provided, or both are None.
+    """
+    have_call = call is not None and np.isfinite(call)
+    have_put = put is not None and np.isfinite(put)
+
+    if have_call and have_put:
+        raise ValueError("Provide exactly one leg: call OR put (not both).")
+    if not have_call and not have_put:
+        raise ValueError(
+            "Provide exactly one leg: call OR put (neither given)."
+        )
+
+    if have_call:
+        return "P", synth_put_from_call(S, K, r, T, float(call), q=q)
+    else:
+        return "C", synth_call_from_put(S, K, r, T, float(put), q=q)

@@ -110,3 +110,67 @@ def estimate_forward_from_chain(
         if w.sum() <= 0:
             return float(np.mean(Fi_sel))
         return float(np.average(Fi_sel, weights=w))
+
+
+def estimate_forward_from_pcp(
+    calls: np.ndarray | pd.Series,
+    puts: np.ndarray | pd.Series,
+    strikes: np.ndarray | pd.Series,
+    *,
+    r: float,
+    T: float,
+    weights: np.ndarray | pd.Series | None = None,
+) -> float:
+    """
+    Direct PCP-based forward estimator from parallel arrays/Series.
+
+    Given arrays (or pandas Series) of call mids `calls`, put mids `puts`, and
+    strikes `strikes` for the *same* set of strikes (rows), compute per-strike
+    PCP forwards:
+        F_i = K_i + (C_i - P_i) * exp(rT)
+
+    Then return an equal- or weight-averaged estimate.
+
+    Parameters
+    ----------
+    calls, puts, strikes : array-like (same length)
+        Call/put mids and strikes. Any row with a NaN in (C, P, K) is ignored.
+    r : float
+        Continuously-compounded risk-free (or carry) rate.
+    T : float
+        Time to maturity in years.
+    weights : array-like, optional
+        Optional non-negative weights (e.g., inverse relative spread). If not
+        provided, all valid rows are equally weighted.
+
+    Returns
+    -------
+    float
+        Estimated forward price F.
+
+    Raises
+    ------
+    ValueError
+        If fewer than one valid (C,P,K) triple is available.
+    """
+    C = np.asarray(calls, dtype=float)
+    P = np.asarray(puts, dtype=float)
+    K = np.asarray(strikes, dtype=float)
+
+    mask = np.isfinite(C) & np.isfinite(P) & np.isfinite(K)
+    if not np.any(mask):
+        raise ValueError("No valid (call, put, strike) triples for PCP.")
+
+    C, P, K = C[mask], P[mask], K[mask]
+    disc_r = np.exp(r * T)
+    F_i = K + (C - P) * disc_r
+
+    if weights is None:
+        return float(np.mean(F_i))
+
+    w = np.asarray(weights, dtype=float)
+    w = w[mask] if w.shape[0] == mask.shape[0] else w
+    w = np.where(np.isfinite(w) & (w >= 0.0), w, 0.0)
+    if w.sum() <= 0:
+        return float(np.mean(F_i))
+    return float(np.average(F_i, weights=w))
