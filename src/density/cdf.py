@@ -19,7 +19,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("density.cdf")
 
 
 def build_cdf(K: np.ndarray, pdf: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

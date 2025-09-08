@@ -27,7 +27,7 @@ from typing import Any, Dict
 import numpy as np
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vol.no_arb")
 
 
 def _second_derivative_nonuniform(x: np.ndarray, y: np.ndarray) -> np.ndarray:

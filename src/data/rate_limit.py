@@ -23,7 +23,7 @@ import logging
 import random
 from typing import Any, Awaitable, Callable
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.rate_limit")
 
 
 class AsyncRateLimiter:

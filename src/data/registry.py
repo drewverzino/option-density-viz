@@ -17,7 +17,7 @@ from .okx_fetcher import OKXFetcher
 from .polygon_fetcher import PolygonFetcher
 from .yf_fetcher import YFinanceFetcher
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.registry")
 
 
 def get_fetcher(

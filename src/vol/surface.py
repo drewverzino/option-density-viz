@@ -38,7 +38,7 @@ except Exception:  # pragma: no cover
 from .svi import SVIFit, calibrate_svi_from_quotes, svi_total_variance
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vol.surface")
 
 # --------------------------------------------------------------------- #
 # Black-76 helpers (for price→IV bootstrapping)

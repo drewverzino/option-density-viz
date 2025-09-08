@@ -21,7 +21,7 @@ import pandas as pd
 
 from .base import OptionChain, OptionQuote
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.historical_loader")
 
 # ----------------- DataFrame conversion -----------------
 

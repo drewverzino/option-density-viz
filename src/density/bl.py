@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover
     _HAVE_SCIPY = False
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("density.bl")
 
 
 @dataclass

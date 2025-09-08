@@ -23,7 +23,7 @@ from typing import Dict, List, Literal, Optional, Protocol
 OptType = Literal["C", "P"]  # option type: Call or Put
 AssetClass = Literal["equity", "crypto"]
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.base")
 
 
 @dataclass

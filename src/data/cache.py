@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.cache")
 
 
 @dataclass

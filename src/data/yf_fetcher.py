@@ -23,7 +23,7 @@ import yfinance as yf
 
 from .base import OptionChain, OptionFetcher, OptionQuote
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.yf_fetcher")
 
 
 def _nan_to_none(x):

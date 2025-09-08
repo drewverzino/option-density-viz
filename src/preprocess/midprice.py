@@ -21,7 +21,7 @@ import math
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("preprocess.midprice")
 
 
 def _clean_side(x: float | None) -> float | None:

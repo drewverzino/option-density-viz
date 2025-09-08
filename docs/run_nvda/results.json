@@ -2,18 +2,34 @@
   "asset_class": "equity",
   "underlying": "NVDA",
   "expiry": "2025-09-12",
-  "asof_utc": "2025-09-08T06:52:32.072577+00:00",
-  "n_quotes": 0,
-  "n_calls": 0,
-  "n_iv_points": 0,
-  "r": 0.05,
-  "T": 0.010167057299129211,
-  "F": 167.10492668003667,
-  "spot": 167.02,
+  "backend": "yfinance",
+  "asof_utc": "2025-09-08T16:03:40.392564+00:00",
+  "n_quotes": 120,
+  "n_calls": 67,
+  "n_iv_points": 59,
+  "r": 0.02,
+  "T": 0.009119185471518748,
+  "F": 169.8809806981482,
+  "spot": 169.85,
   "svi": {
-    "note": "Insufficient IV points: 0 < 7"
+    "params": [
+      1e-08,
+      0.0649576918683512,
+      -0.5516410171884841,
+      -0.0668844383818377,
+      0.002542369552756585
+    ],
+    "loss": 0.0039454689056450535,
+    "n_used": 59,
+    "method": "L-BFGS-B"
   },
-  "bl": null,
-  "plots_created": 0,
+  "bl": {
+    "integral": 1.0,
+    "neg_frac": 0.18952618453865336,
+    "rn_mean": 145.64241533200735,
+    "rn_var": 1346.6208363750923,
+    "note": "pchipped uniform grid"
+  },
+  "plots_created": 3,
   "notes": ""
 }

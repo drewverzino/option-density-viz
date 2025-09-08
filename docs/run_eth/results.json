@@ -1,0 +1,26 @@
+{
+  "asset_class": "crypto",
+  "underlying": "ETH",
+  "expiry": "2025-09-12",
+  "backend": "crypto",
+  "asof_utc": "2025-09-08T16:14:53.475601+00:00",
+  "n_quotes": 53,
+  "n_calls": 24,
+  "n_iv_points": 0,
+  "r": 0.02,
+  "T": 0.009097856757136157,
+  "F": 4360.123283367538,
+  "spot": 4359.33,
+  "svi": {
+    "note": "Insufficient IV points: 0 < 7"
+  },
+  "bl": {
+    "integral": 1.0,
+    "neg_frac": 0.12718204488778054,
+    "rn_mean": 4310.552241920788,
+    "rn_var": 104713.04737037516,
+    "note": "pchipped uniform grid"
+  },
+  "plots_created": 1,
+  "notes": ""
+}

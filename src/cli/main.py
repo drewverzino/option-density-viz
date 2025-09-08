@@ -2,24 +2,10 @@
 """
 Option Viz CLI
 ==============
-
 Two ways to use:
 1) Pipeline (default): data → preprocess → SVI → BL density → plots + artifacts
-   Examples:
-     python -m src.cli.main --asset-class crypto --underlying BTC --expiry 2025-09-26 --out docs/run_btc
-     python -m src.cli.main --asset-class crypto --asset BTC --expiry 250926 --out docs/run_btc   # legacy YYMMDD accepted
-     python -m src.cli.main --asset-class equity --underlying AAPL --expiry 2025-12-19 --out docs/run_aapl
-
 2) Dashboard: launch the Streamlit UI (interactive)
-   Example:
-     python -m src.cli.main --dashboard
-
-Artifacts written to --out (pipeline mode):
-  - chain.csv                : normalized quotes for the selected expiry
-  - results.json             : diagnostics (SVI, BL, counts)
-  - smile_market.png         : market smile (IV vs log-moneyness)
-  - smile_model.png          : SVI model vs market IV curve
-  - density_pdf_cdf.png      : RN PDF & CDF with markers
+Artifacts: chain.csv, results.json, smile_market.png, smile_model.png, density_pdf_cdf.png
 """
 
 from __future__ import annotations
@@ -35,13 +21,13 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 
-# ---------- Logging setup ----------------
+# ---------- Logging setup ----------
 class ColoredFormatter(logging.Formatter):
     COLORS = {
         "DEBUG": "\033[36m",
@@ -64,7 +50,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO") -> logging.Logger:
-    logger = logging.getLogger("oviz")
+    logger = logging.getLogger("main")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
@@ -83,7 +69,7 @@ def setup_logging(level: str = "INFO") -> logging.Logger:
 logger = setup_logging()
 
 
-# ---------- Flexible imports (package style first, then flat) ----------------
+# ---------- Flexible imports ----------
 def _import_modules():
     logger.debug("Importing project modules...")
     try:
@@ -114,6 +100,7 @@ def _import_modules():
 
             estimate_forward = estimate_forward_from_chain
             logger.debug("Using estimate_forward_from_chain")
+
         from ..density import (  # type: ignore
             bl_pdf_from_calls,
             build_cdf,
@@ -130,7 +117,6 @@ def _import_modules():
             svi_total_variance,
         )
 
-        logger.debug("Successfully imported modules (package-style)")
     except Exception as e:
         logger.debug(
             f"Package-style import failed: {e}, trying flat imports..."
@@ -162,6 +148,7 @@ def _import_modules():
 
             estimate_forward = estimate_forward_from_chain
             logger.debug("Using estimate_forward_from_chain")
+
         from density import (  # type: ignore
             bl_pdf_from_calls,
             build_cdf,
@@ -177,8 +164,6 @@ def _import_modules():
             calibrate_svi_from_quotes,
             svi_total_variance,
         )
-
-        logger.debug("Successfully imported modules (flat-style)")
 
     return {
         "get_fetcher": get_fetcher,
@@ -231,6 +216,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Try to open the dashboard in your browser (Streamlit default).",
     )
+
     p.add_argument(
         "--asset-class",
         choices=["equity", "crypto"],
@@ -283,7 +269,7 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ------------------------------ Helpers -------------------------------------
+# ------------------------------ Utilities -----------------------------------
 def _parse_expiry_any(s: str) -> datetime:
     if re.fullmatch(r"\d{6}", s):
         dt = datetime.strptime(s, "%y%m%d")
@@ -296,7 +282,7 @@ def _parse_expiry_any(s: str) -> datetime:
         ) from e
 
 
-def _match_expiry(expiries: list[datetime], want: datetime) -> datetime:
+def _match_expiry(expiries: List[datetime], want: datetime) -> datetime:
     logger.debug(
         f"Matching expiry {want.date()} from {len(expiries)} available expiries"
     )
@@ -361,32 +347,84 @@ def _launch_streamlit_dashboard(
         ) from e
 
 
-# ------------------------------ Pipeline (async) -----------------------------
-async def _choose_equity_fetcher():
-    """
-    Prefer Polygon for equities; fall back to Yahoo Finance.
-    """
-    # Lazy imports so the CLI still works if polygon file/env isn't present.
+# ---- Equity fetcher selection: Polygon → YFinance (fallback) ----
+async def _choose_equity_fetchers():
     candidates = []
     try:
-        from ..data.polygon_fetcher import PolygonFetcher  # type: ignore
+        from ..data.polygon_fetcher import (  # prefer polygon if available
+            PolygonFetcher,
+        )
 
         candidates.append(("polygon", PolygonFetcher()))
     except Exception as e:
         logger.info(
             f"Polygon backend unavailable ({e}); will fall back to Yahoo Finance."
         )
-
+    # Always include Yahoo fallback (yfinance)
     try:
-        from ..data.yf_fetcher import YFinanceFetcher  # type: ignore
+        from ..data.yf_fetcher import YFinanceFetcher
     except Exception:
-        from data.yf_fetcher import YFinanceFetcher  # type: ignore
-    candidates.append(
-        ("yfinance", YFinanceFetcher())
-    )  # always include fallback
+        from data.yf_fetcher import YFinanceFetcher
+    candidates.append(("yfinance", YFinanceFetcher()))
     return candidates
 
 
+def _estimate_forward_compat(df: pd.DataFrame, r: float, T: float):
+    func = M["estimate_forward"]
+    func_name = getattr(func, '__name__', str(func))
+    
+    # Check if this is estimate_forward_from_chain (takes DataFrame)
+    if func_name == 'estimate_forward_from_chain':
+        sig = inspect.signature(func)
+        params = set(sig.parameters.keys())
+        kwargs = {"r": r, "T": T}
+        
+        # Add optional parameters if supported
+        if "price_col" in params:
+            kwargs["price_col"] = "mid"
+        if "type_col" in params:
+            kwargs["type_col"] = "type"
+        if "strike_col" in params:
+            kwargs["strike_col"] = "strike"
+        if "top_n" in params:
+            kwargs["top_n"] = 7
+            
+        return float(func(df, **kwargs))
+    
+    # Check if this is estimate_forward_from_pcp (takes arrays)
+    elif func_name == 'estimate_forward_from_pcp':
+        # Need to extract call/put/strike arrays from DataFrame
+        try:
+            from .pcp import pivot_calls_puts_by_strike
+        except ImportError:
+            try:
+                from preprocess.pcp import pivot_calls_puts_by_strike
+            except ImportError:
+                raise ValueError("Cannot import pivot_calls_puts_by_strike for PCP forward estimation")
+        
+        # Get call/put pairs
+        wide = pivot_calls_puts_by_strike(
+            df, price_col="mid", type_col="type", strike_col="strike"
+        )
+        
+        if wide.empty or "C" not in wide.columns or "P" not in wide.columns:
+            raise ValueError("No call/put pairs found for PCP forward estimation")
+        
+        calls = wide["C"].to_numpy(dtype=float)
+        puts = wide["P"].to_numpy(dtype=float) 
+        strikes = wide.index.to_numpy(dtype=float)
+        
+        return float(func(calls, puts, strikes, r=r, T=T))
+    
+    else:
+        # Try generic approach
+        try:
+            return float(func(df, r=r, T=T))
+        except TypeError:
+            return float(func(df, r, T))
+
+
+# ------------------------------ Pipeline (async) -----------------------------
 async def _run_pipeline(args) -> None:
     logger.setLevel(getattr(logging, args.log_level))
     from math import exp
@@ -402,20 +440,16 @@ async def _run_pipeline(args) -> None:
 
     # 1) Data fetch
     logger.info("Step 1/9: Fetching option chain data...")
-
-    # NEW: Prefer Polygon for equity, else fallback to YF; crypto unchanged via registry
-    fetchers = []
     if args.asset_class == "equity":
-        fetchers = await _choose_equity_fetcher()
+        candidates = await _choose_equity_fetchers()
     else:
-        fetchers = [
-            (args.asset_class, M["get_fetcher"](args.asset_class))
-        ]  # OKX etc.
+        candidates = [(args.asset_class, M["get_fetcher"](args.asset_class))]
 
-    last_err = None
     chain = None
-    chosen_name = None
-    for name, fetcher in fetchers:
+    chosen_backend = None
+    last_err: Optional[Exception] = None
+
+    for name, fetcher in candidates:
         try:
             logger.debug(f"Listing expiries for {args.underlying}")
             expiries = sorted(await fetcher.list_expiries(args.underlying))
@@ -423,9 +457,22 @@ async def _run_pipeline(args) -> None:
             target = _match_expiry(expiries, _parse_expiry_any(args.expiry))
             logger.info(f"Target expiry: {target}")
             logger.debug("Fetching option chain...")
-            chain = await fetcher.fetch_chain(args.underlying, target)
-            chosen_name = name
+            candidate_chain = await fetcher.fetch_chain(
+                args.underlying, target
+            )
+            await _maybe_aclose(fetcher)
+
+            # --- NEW: auto-fallback if 0 quotes ---
+            if not candidate_chain.quotes:
+                logger.warning(
+                    f"{name} returned 0 quotes for {args.underlying} {target.date()} — trying next backend..."
+                )
+                continue
+
+            chain = candidate_chain
+            chosen_backend = name
             break
+
         except Exception as e:
             last_err = e
             logger.warning(
@@ -438,10 +485,9 @@ async def _run_pipeline(args) -> None:
 
     asof = chain.asof_utc
     logger.info(f"Fetched chain as of {asof} with {len(chain.quotes)} quotes")
-    if chosen_name != "yfinance":
-        logger.info(f"Backend: {chosen_name} (preferred)")
-    else:
-        logger.info(f"Backend: {chosen_name} (fallback)")
+    logger.info(
+        f"Backend: {chosen_backend}{' (fallback)' if chosen_backend=='yfinance' else ' (preferred)'}"
+    )
 
     df = M["chain_to_dataframe"](chain)
     logger.debug(
@@ -452,37 +498,52 @@ async def _run_pipeline(args) -> None:
     logger.debug("Saving raw chain to CSV...")
     M["save_chain_csv"](out_dir / "chain.csv", chain)
 
+    # --- NEW: Hard guard against empty/malformed frames ---
+    if df.empty or "strike" not in df.columns:
+        logger.error(
+            "No usable quotes (empty DataFrame or missing 'strike'). "
+            f"Backend={chosen_backend}. Exiting early."
+        )
+        _save_json(
+            out_dir / "results.json",
+            {
+                "asset_class": args.asset_class,
+                "underlying": args.underlying,
+                "expiry": args.expiry,
+                "backend": chosen_backend,
+                "asof_utc": asof.isoformat(),
+                "n_quotes": 0,
+                "notes": "No usable quotes; skipped preprocessing and modeling.",
+            },
+        )
+        logger.info("Pipeline completed (early exit due to empty data).")
+        return
+
     # 2) Preprocess
     logger.info("Step 2/9: Preprocessing quotes (midprices, flags)...")
 
-    # Normalize type to C/P first
     if "type" in df.columns:
         df["type"] = df["type"].astype(str).str.upper().str.strip().str[0]
         df = df[df["type"].isin(["C", "P"])]
 
-    # Numeric coercions
     for c in ("strike", "bid", "ask", "mid", "iv"):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Build mid from bid/ask if needed
     if "mid" not in df.columns and {"bid", "ask"}.issubset(df.columns):
         df["mid"] = (df["bid"] + df["ask"]) / 2.0
 
-    # Drop unusable rows
     df = df.dropna(subset=["strike"])
     df = df[df["strike"] > 0]
     if "mid" in df.columns:
         df = df.dropna(subset=["mid"])
         df = df[df["mid"] > 0]
 
-    # Clip insane IVs to NaN (helps SVI & BL)
     if "iv" in df.columns:
         df.loc[
             (df["iv"] <= 0) | (~np.isfinite(df["iv"])) | (df["iv"] > 3.0), "iv"
         ] = np.nan
 
-    # Your existing spread flags
     df = M["add_midprice_columns"](df, wide_rel_threshold=0.15)
     n_crossed = int(df.get("crossed", pd.Series([], dtype=bool)).sum()) if "crossed" in df.columns else 0  # type: ignore
     n_wide = int(df.get("wide", pd.Series([], dtype=bool)).sum()) if "wide" in df.columns else 0  # type: ignore
@@ -498,30 +559,22 @@ async def _run_pipeline(args) -> None:
         r = 0.0
         logger.warning(f"Failed to get risk-free rate, using 0.0: {e}")
 
-    # Find the actual expiry we fetched (chain is single-expiry)
-    # Your fetchers already respect the requested expiry in quotes; we reuse args.expiry below.
     target = _parse_expiry_any(args.expiry)
     T = float(M["yearfrac"](asof, target))
     logger.info(f"T = {T:.4f} years (~{T*365:.1f} days)")
 
-    # 4) Forward estimate (remove unsupported min_pairs; pass robust args)
+    # 4) Forward estimate — signature-compatible
     logger.info("Step 4/9: Estimating forward price...")
-    spot = chain.spot or float("nan")
+    spot = chain.spot if np.isfinite(chain.spot or np.nan) else np.nan
     try:
-        F = float(
-            M["estimate_forward"](
-                df,
-                r=r,
-                T=T,
-                price_col="mid",
-                type_col="type",
-                strike_col="strike",
-                top_n=7,
-            )
-        )
+        F = _estimate_forward_compat(df, r, T)
         logger.info(f"Forward (PCP): {F:.4f}")
     except Exception as e:
-        F = float(spot * exp(r * T)) if np.isfinite(spot) else float(np.nan)
+        F = (
+            float((spot or 0.0) * np.exp(r * T))
+            if np.isfinite(spot)
+            else float("nan")
+        )
         logger.warning(
             f"PCP forward failed; using spot*exp(rT): {F:.4f} | {e}"
         )
@@ -652,7 +705,7 @@ async def _run_pipeline(args) -> None:
             save_path=Path(args.out) / "smile_model.png",
         )
         plots_created += 1
-    if "K_pdf" in locals() and K_pdf is not None and pdf is not None:
+    if K_pdf is not None and pdf is not None:
         stats = M["moments_from_pdf"](K_pdf, pdf)
         marks = {}
         if np.isfinite(stats.get("mean", np.nan)):
@@ -675,6 +728,7 @@ async def _run_pipeline(args) -> None:
         "asset_class": args.asset_class,
         "underlying": args.underlying,
         "expiry": args.expiry,
+        "backend": chosen_backend,  # record which backend produced data
         "asof_utc": asof.isoformat(),
         "n_quotes": int(df.shape[0]),
         "n_calls": int(len(calls_df)),

@@ -39,7 +39,7 @@ from numpy.typing import ArrayLike
 from scipy.optimize import minimize
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vol.svi")
 
 # ------------------------------ Data Types ------------------------------ #
 

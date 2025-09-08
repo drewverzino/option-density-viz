@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 from .base import OptionChain, OptionFetcher, OptionQuote
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("data.okx_fetcher")
 
 # Load .env for optional private credentials (OKX_API_KEY/SECRET/PASSPHRASE)
 load_dotenv()
