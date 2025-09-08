@@ -14,6 +14,7 @@ from typing import Literal
 
 from .base import OptionFetcher
 from .okx_fetcher import OKXFetcher
+from .polygon_fetcher import PolygonFetcher
 from .yf_fetcher import YFinanceFetcher
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,12 @@ def get_fetcher(
         fetcher = OKXFetcher(**kwargs)
         logger.info(f"Created OKXFetcher")
         return fetcher
+    elif asset_class == "equity_polygon":
+        logger.info(f"Created PolygonFetcher")
+        return PolygonFetcher(**kwargs)
+    elif asset_class == "crypto_polygon":
+        logger.info(f"Created PolygonFetcher")
+        return PolygonFetcher(**kwargs)
     else:
         logger.error(f"Unsupported asset_class: {asset_class}")
         raise ValueError(f"Unsupported asset_class: {asset_class}")

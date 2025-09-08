@@ -3,20 +3,23 @@
 Option Viz CLI
 ==============
 
-End-to-end pipeline:
-    data → preprocess → SVI fit → BL density → plots + artifacts
+Two ways to use:
+1) Pipeline (default): data → preprocess → SVI → BL density → plots + artifacts
+   Examples:
+     python -m src.cli.main --asset-class crypto --underlying BTC --expiry 2025-09-26 --out docs/run_btc
+     python -m src.cli.main --asset-class crypto --asset BTC --expiry 250926 --out docs/run_btc   # legacy YYMMDD accepted
+     python -m src.cli.main --asset-class equity --underlying AAPL --expiry 2025-12-19 --out docs/run_aapl
 
-Artifacts written to --out:
-    - chain.csv                : normalized quotes for the selected expiry
-    - results.json             : diagnostics (SVI, BL, counts)
-    - smile_market.png         : market smile (IV vs log-moneyness)
-    - smile_model.png          : SVI model vs market IV curve
-    - density_pdf_cdf.png      : RN PDF & CDF with markers
+2) Dashboard: launch the Streamlit UI (interactive)
+   Example:
+     python -m src.cli.main --dashboard
 
-Notes
------
-- Uses OKX (public) for crypto and yfinance for equities.
-- Run with:  python -m src.cli.main --asset-class crypto --underlying BTC --expiry 2025-09-26 --out docs/run_btc
+Artifacts written to --out (pipeline mode):
+  - chain.csv                : normalized quotes for the selected expiry
+  - results.json             : diagnostics (SVI, BL, counts)
+  - smile_market.png         : market smile (IV vs log-moneyness)
+  - smile_model.png          : SVI model vs market IV curve
+  - density_pdf_cdf.png      : RN PDF & CDF with markers
 """
 
 from __future__ import annotations
@@ -26,86 +29,65 @@ import asyncio
 import inspect
 import json
 import logging
-import math
+import os
+import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 
 import numpy as np
+import pandas as pd
+
 
 # ---------- Logging setup ----------------
-
-
 class ColoredFormatter(logging.Formatter):
-    """Formatter that adds colors to log levels."""
-
     COLORS = {
-        'DEBUG': '\033[36m',  # Cyan
-        'INFO': '\033[32m',  # Green
-        'WARNING': '\033[33m',  # Yellow
-        'ERROR': '\033[31m',  # Red
-        'CRITICAL': '\033[35m',  # Magenta
+        "DEBUG": "\033[36m",
+        "INFO": "\033[32m",
+        "WARNING": "\033[33m",
+        "ERROR": "\033[31m",
+        "CRITICAL": "\033[35m",
     }
-    RESET = '\033[0m'
+    RESET = "\033[0m"
 
     def format(self, record):
-        # Only colorize if we're outputting to a terminal
-        if hasattr(sys.stdout, 'isatty') and sys.stdout.isatty():
-            color = self.COLORS.get(record.levelname, '')
-            levelname_colored = f"{color}{record.levelname}{self.RESET}"
-            # Temporarily replace levelname for formatting
-            original_levelname = record.levelname
-            record.levelname = levelname_colored
-            formatted = super().format(record)
-            record.levelname = original_levelname  # Restore original
-            return formatted
-        else:
-            return super().format(record)
+        if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+            color = self.COLORS.get(record.levelname, "")
+            original = record.levelname
+            record.levelname = f"{color}{original}{self.RESET}"
+            out = super().format(record)
+            record.levelname = original
+            return out
+        return super().format(record)
 
 
 def setup_logging(level: str = "INFO") -> logging.Logger:
-    """Setup structured logging with timestamps and colors."""
     logger = logging.getLogger("oviz")
-    logger.setLevel(getattr(logging, level.upper()))
-
-    # Clear any existing handlers
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.handlers.clear()
-
-    # Console handler with colored formatting
     handler = logging.StreamHandler(sys.stdout)
-    formatter = ColoredFormatter(
-        '%(asctime)s | %(name)s | %(levelname)-8s | %(message)s',
-        datefmt='%H:%M:%S',
+    handler.setFormatter(
+        ColoredFormatter(
+            "%(asctime)s | %(name)s | %(levelname)-8s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
-    handler.setFormatter(formatter)
     logger.addHandler(handler)
-
-    # Quiet external libraries
-    logging.getLogger('matplotlib').setLevel(logging.WARNING)
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
     return logger
 
 
 logger = setup_logging()
 
+
 # ---------- Flexible imports (package style first, then flat) ----------------
-
-
 def _import_modules():
-    """
-    Import project modules whether we run as `python -m src.cli.main`
-    (package-style) or via a flat PYTHONPATH pointing at ./src.
-
-    Forward estimator note:
-      - It lives in preprocess.forward (not preprocess.pcp).
-      - Name may be `estimate_forward_from_pcp` or `estimate_forward_from_chain`.
-        We try both and alias to `estimate_forward`.
-    """
     logger.debug("Importing project modules...")
     try:
-        # Package-style imports (preferred)
+        # Package-style
         from ..data.historical_loader import (  # type: ignore
             chain_to_dataframe,
             save_chain_csv,
@@ -132,7 +114,6 @@ def _import_modules():
 
             estimate_forward = estimate_forward_from_chain
             logger.debug("Using estimate_forward_from_chain")
-
         from ..density import (  # type: ignore
             bl_pdf_from_calls,
             build_cdf,
@@ -154,7 +135,7 @@ def _import_modules():
         logger.debug(
             f"Package-style import failed: {e}, trying flat imports..."
         )
-        # Flat-style imports (PYTHONPATH includes ./src)
+        # Flat
         from data.historical_loader import (  # type: ignore
             chain_to_dataframe,
             save_chain_csv,
@@ -181,7 +162,6 @@ def _import_modules():
 
             estimate_forward = estimate_forward_from_chain
             logger.debug("Using estimate_forward_from_chain")
-
         from density import (  # type: ignore
             bl_pdf_from_calls,
             build_cdf,
@@ -223,45 +203,76 @@ def _import_modules():
 
 M = _import_modules()
 
+
 # ------------------------------ CLI args ------------------------------------
-
-
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="oviz",
-        description="Option Viz: data → preprocess → SVI → BL density → plots",
+        description="Option Viz: pipeline runner and Streamlit dashboard launcher",
+    )
+    p.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Launch the Streamlit dashboard UI and exit.",
+    )
+    p.add_argument(
+        "--dashboard-path",
+        default=str(
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "viz"
+            / "dashboard.py"
+        ),
+        help="Path to the Streamlit dashboard script (advanced).",
+    )
+    p.add_argument(
+        "--open",
+        dest="open_browser",
+        action="store_true",
+        help="Try to open the dashboard in your browser (Streamlit default).",
     )
     p.add_argument(
         "--asset-class",
         choices=["equity", "crypto"],
-        required=True,
-        help="Data backend to use: equity (yfinance) or crypto (OKX).",
+        help="Data backend to use: equity (Polygon→YF) or crypto (OKX).",
     )
     p.add_argument(
-        "--underlying", required=True, help="Ticker/symbol, e.g., AAPL or BTC."
+        "--underlying",
+        "--asset",
+        dest="underlying",
+        help="Ticker/symbol, e.g., AAPL or BTC. (--asset alias supported)",
     )
     p.add_argument(
         "--expiry",
-        required=True,
-        help="Target expiry date (YYYY-MM-DD). We'll match the exact date.",
+        help="Target expiry date: YYYY-MM-DD (new) or YYMMDD (legacy).",
     )
     p.add_argument(
-        "--out", default="docs/run", help="Output directory for artifacts."
+        "--out",
+        default="docs/run",
+        help="Output directory for artifacts (pipeline mode).",
     )
     p.add_argument(
         "--theme",
         choices=["light", "dark"],
         default="light",
-        help="Plot theme.",
+        help="Plot theme (pipeline mode).",
     )
     p.add_argument(
-        "--min-points", type=int, default=7, help="Min IV points for SVI fit."
+        "--min-points",
+        type=int,
+        default=7,
+        help="Min IV points for SVI fit (pipeline mode).",
     )
     p.add_argument(
-        "--grid-n", type=int, default=401, help="Grid size for BL density."
+        "--grid-n",
+        type=int,
+        default=401,
+        help="Grid size for BL density (pipeline mode).",
     )
     p.add_argument(
-        "--skip-density", action="store_true", help="Skip BL density step."
+        "--skip-density",
+        action="store_true",
+        help="Skip BL density step (pipeline mode).",
     )
     p.add_argument(
         "--log-level",
@@ -273,13 +284,16 @@ def _parse_args() -> argparse.Namespace:
 
 
 # ------------------------------ Helpers -------------------------------------
-
-
-def _iso_to_date(s: str) -> datetime:
+def _parse_expiry_any(s: str) -> datetime:
+    if re.fullmatch(r"\d{6}", s):
+        dt = datetime.strptime(s, "%y%m%d")
+        return dt.replace(tzinfo=timezone.utc)
     try:
         return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except Exception as e:
-        raise ValueError(f"Invalid --expiry {s!r}; expected YYYY-MM-DD") from e
+        raise ValueError(
+            f"Invalid --expiry {s!r}; expected YYYY-MM-DD or YYMMDD"
+        ) from e
 
 
 def _match_expiry(expiries: list[datetime], want: datetime) -> datetime:
@@ -290,14 +304,11 @@ def _match_expiry(expiries: list[datetime], want: datetime) -> datetime:
         if e.date() == want.date():
             logger.debug(f"Found exact match: {e}")
             return e
-
     available_str = [x.date().isoformat() for x in expiries[:10]]
     if len(expiries) > 10:
         available_str.append("...")
-
     raise ValueError(
-        f"Expiry {want.date().isoformat()} not found; "
-        f"available: {available_str}"
+        f"Expiry {want.date().isoformat()} not found; available: {available_str}"
     )
 
 
@@ -317,10 +328,6 @@ def _save_json(path: Path, payload: Dict) -> None:
 
 
 async def _maybe_aclose(fetcher) -> None:
-    """
-    Best-effort cleanup for async clients (e.g., OKXFetcher with httpx.AsyncClient).
-    Works whether `aclose()` is coroutine or `close()` is sync.
-    """
     fn = getattr(fetcher, "aclose", None) or getattr(fetcher, "close", None)
     if not fn:
         return
@@ -330,16 +337,61 @@ async def _maybe_aclose(fetcher) -> None:
     logger.debug("Closed async fetcher")
 
 
-# ------------------------------ Main (async) --------------------------------
+def _launch_streamlit_dashboard(
+    script_path: Path, open_browser: bool = True
+) -> int:
+    if not script_path.exists():
+        raise FileNotFoundError(f"Dashboard script not found: {script_path}")
+    repo_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{repo_root}{os.pathsep}{pp}" if pp else str(repo_root)
+    )
+    args = [sys.executable, "-m", "streamlit", "run", str(script_path)]
+    if not open_browser:
+        args += ["--server.headless=true"]
+    logger.info(f"Launching Streamlit dashboard: {script_path}")
+    logger.debug(f"PYTHONPATH={env['PYTHONPATH']}")
+    try:
+        return subprocess.call(args, env=env)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Failed to launch Streamlit. Make sure 'streamlit' is installed:\n    pip install streamlit plotly\n"
+        ) from e
 
 
-async def main() -> None:
-    args = _parse_args()
+# ------------------------------ Pipeline (async) -----------------------------
+async def _choose_equity_fetcher():
+    """
+    Prefer Polygon for equities; fall back to Yahoo Finance.
+    """
+    # Lazy imports so the CLI still works if polygon file/env isn't present.
+    candidates = []
+    try:
+        from ..data.polygon_fetcher import PolygonFetcher  # type: ignore
 
-    # Update logging level
+        candidates.append(("polygon", PolygonFetcher()))
+    except Exception as e:
+        logger.info(
+            f"Polygon backend unavailable ({e}); will fall back to Yahoo Finance."
+        )
+
+    try:
+        from ..data.yf_fetcher import YFinanceFetcher  # type: ignore
+    except Exception:
+        from data.yf_fetcher import YFinanceFetcher  # type: ignore
+    candidates.append(
+        ("yfinance", YFinanceFetcher())
+    )  # always include fallback
+    return candidates
+
+
+async def _run_pipeline(args) -> None:
     logger.setLevel(getattr(logging, args.log_level))
+    from math import exp
 
-    logger.info(f"Starting Option Viz CLI")
+    logger.info("Starting Option Viz CLI")
     logger.info(
         f"Target: {args.underlying} ({args.asset_class}) expiry {args.expiry}"
     )
@@ -348,312 +400,327 @@ async def main() -> None:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) Data fetch (single event loop for entire run)
+    # 1) Data fetch
     logger.info("Step 1/9: Fetching option chain data...")
-    fetcher = M["get_fetcher"](args.asset_class)
+
+    # NEW: Prefer Polygon for equity, else fallback to YF; crypto unchanged via registry
+    fetchers = []
+    if args.asset_class == "equity":
+        fetchers = await _choose_equity_fetcher()
+    else:
+        fetchers = [
+            (args.asset_class, M["get_fetcher"](args.asset_class))
+        ]  # OKX etc.
+
+    last_err = None
+    chain = None
+    chosen_name = None
+    for name, fetcher in fetchers:
+        try:
+            logger.debug(f"Listing expiries for {args.underlying}")
+            expiries = sorted(await fetcher.list_expiries(args.underlying))
+            logger.info(f"Found {len(expiries)} available expiries")
+            target = _match_expiry(expiries, _parse_expiry_any(args.expiry))
+            logger.info(f"Target expiry: {target}")
+            logger.debug("Fetching option chain...")
+            chain = await fetcher.fetch_chain(args.underlying, target)
+            chosen_name = name
+            break
+        except Exception as e:
+            last_err = e
+            logger.warning(
+                f"{name} backend failed: {e}. Trying next candidate..."
+            )
+            await _maybe_aclose(fetcher)
+
+    if chain is None:
+        raise RuntimeError(f"All backends failed. Last error: {last_err}")
+
+    asof = chain.asof_utc
+    logger.info(f"Fetched chain as of {asof} with {len(chain.quotes)} quotes")
+    if chosen_name != "yfinance":
+        logger.info(f"Backend: {chosen_name} (preferred)")
+    else:
+        logger.info(f"Backend: {chosen_name} (fallback)")
+
+    df = M["chain_to_dataframe"](chain)
+    logger.debug(
+        f"Converted to DataFrame: {df.shape[0]} rows, {df.shape[1]} cols"
+    )
+
+    # Save normalized chain early (raw snapshot)
+    logger.debug("Saving raw chain to CSV...")
+    M["save_chain_csv"](out_dir / "chain.csv", chain)
+
+    # 2) Preprocess
+    logger.info("Step 2/9: Preprocessing quotes (midprices, flags)...")
+
+    # Normalize type to C/P first
+    if "type" in df.columns:
+        df["type"] = df["type"].astype(str).str.upper().str.strip().str[0]
+        df = df[df["type"].isin(["C", "P"])]
+
+    # Numeric coercions
+    for c in ("strike", "bid", "ask", "mid", "iv"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # Build mid from bid/ask if needed
+    if "mid" not in df.columns and {"bid", "ask"}.issubset(df.columns):
+        df["mid"] = (df["bid"] + df["ask"]) / 2.0
+
+    # Drop unusable rows
+    df = df.dropna(subset=["strike"])
+    df = df[df["strike"] > 0]
+    if "mid" in df.columns:
+        df = df.dropna(subset=["mid"])
+        df = df[df["mid"] > 0]
+
+    # Clip insane IVs to NaN (helps SVI & BL)
+    if "iv" in df.columns:
+        df.loc[
+            (df["iv"] <= 0) | (~np.isfinite(df["iv"])) | (df["iv"] > 3.0), "iv"
+        ] = np.nan
+
+    # Your existing spread flags
+    df = M["add_midprice_columns"](df, wide_rel_threshold=0.15)
+    n_crossed = int(df.get("crossed", pd.Series([], dtype=bool)).sum()) if "crossed" in df.columns else 0  # type: ignore
+    n_wide = int(df.get("wide", pd.Series([], dtype=bool)).sum()) if "wide" in df.columns else 0  # type: ignore
+    logger.info(f"Quote quality: {n_crossed} crossed, {n_wide} wide")
+
+    # 3) Risk-free and T
+    logger.info("Step 3/9: Risk-free rate and time to maturity...")
+    rf = M["RiskFreeProvider"](M["RiskFreeConfig"]())
     try:
-        logger.debug(f"Listing expiries for {args.underlying}")
-        expiries = sorted(await fetcher.list_expiries(args.underlying))
-        logger.info(f"Found {len(expiries)} available expiries")
-
-        target = _match_expiry(expiries, _iso_to_date(args.expiry))
-        logger.info(f"Target expiry: {target}")
-
-        logger.debug("Fetching option chain...")
-        chain = await fetcher.fetch_chain(args.underlying, target)
-        asof = chain.asof_utc
-        logger.info(
-            f"Fetched chain as of {asof} with {len(chain.quotes)} quotes"
-        )
-
-        df = M["chain_to_dataframe"](chain)
-        logger.debug(
-            f"Converted to DataFrame: {df.shape[0]} rows, {df.shape[1]} columns"
-        )
-
-        # Save normalized chain early (raw snapshot)
-        logger.debug("Saving raw chain to CSV...")
-        M["save_chain_csv"](out_dir / "chain.csv", chain)
-
-        # 2) Preprocess (mids & flags)
-        logger.info("Step 2/9: Preprocessing quotes (midprices, flags)...")
-        df = M["add_midprice_columns"](df, wide_rel_threshold=0.15)
-
-        n_crossed = df["crossed"].sum() if "crossed" in df.columns else 0
-        n_wide = df["wide"].sum() if "wide" in df.columns else 0
-        logger.info(
-            f"Quote quality: {n_crossed} crossed, {n_wide} wide spreads"
-        )
-
-        # 3) Risk-free rate and time to maturity
-        logger.info(
-            "Step 3/9: Computing risk-free rate and time to maturity..."
-        )
-        rf = M["RiskFreeProvider"](M["RiskFreeConfig"]())
-        try:
-            r = float(rf.get_rate(asof.date()))
-            logger.info(f"Risk-free rate: {r:.4f} ({r*100:.2f}%)")
-        except Exception as e:
-            r = 0.0
-            logger.warning(f"Failed to get risk-free rate, using 0.0: {e}")
-
-        T = float(M["yearfrac"](asof, target))
-        logger.info(f"Time to maturity: {T:.4f} years ({T*365:.1f} days)")
-
-        # 4) Forward estimate (prefer PCP-based estimator)
-        logger.info("Step 4/9: Estimating forward price...")
-        spot = chain.spot
-        logger.debug(f"Spot price: {spot}")
-
-        try:
-            F = float(M["estimate_forward"](df, r=r, T=T, min_pairs=3))
-            logger.info(f"Forward price (from PCP): {F:.4f}")
-        except Exception as e:
-            F = float(spot * math.exp(r * T))
-            logger.warning(
-                f"PCP forward estimation failed, using spot*exp(rT): {F:.4f} | Error: {e}"
-            )
-
-        # 5) Build K, k and collect market IVs (calls only)
-        logger.info(
-            "Step 5/9: Filtering calls and extracting implied volatilities..."
-        )
-        calls_df = df.copy()
-        if "type" in calls_df.columns:
-            t = calls_df["type"].astype(str).str.upper().str.strip()
-            calls_df = calls_df[t.str.startswith("C")]
-        calls_df = calls_df.dropna(subset=["strike", "mid"])
-
-        logger.info(
-            f"Found {len(calls_df)} call options with valid strikes and midprices"
-        )
-
-        K = calls_df["strike"].to_numpy(float)
-        C_mid = calls_df["mid"].to_numpy(float)
-        k = _log_moneyness(K, F)
-
-        logger.debug(f"Strike range: {K.min():.2f} to {K.max():.2f}")
-        logger.debug(f"Log-moneyness range: {k.min():.3f} to {k.max():.3f}")
-
-        iv = None
-        if "iv" in calls_df.columns:
-            iv = calls_df["iv"].to_numpy(float)
-            logger.debug("Using 'iv' column for implied volatilities")
-        elif "extra" in calls_df.columns:
-            try:
-                iv = np.array(
-                    [
-                        float((x or {}).get("iv", np.nan))
-                        for x in calls_df["extra"]
-                    ]
-                )
-                logger.debug("Extracted IVs from 'extra' column")
-            except Exception as e:
-                iv = None
-                logger.debug(f"Failed to extract IVs from 'extra': {e}")
-
-        # Finite IV points for SVI
-        if iv is not None:
-            mask = np.isfinite(iv) & np.isfinite(k) & (iv > 0)
-            k_mkt = k[mask]
-            iv_mkt = iv[mask]
-            logger.info(f"Market IV data: {len(iv_mkt)} valid points")
-            if len(iv_mkt) > 0:
-                logger.info(
-                    f"IV range: {iv_mkt.min():.3f} to {iv_mkt.max():.3f}"
-                )
-        else:
-            k_mkt = np.array([])
-            iv_mkt = np.array([])
-            logger.warning("No implied volatility data available")
-
-        # 6) SVI fit
-        logger.info("Step 6/9: Fitting SVI volatility smile...")
-        w_model = None
-        notes = ""
-        min_points = max(3, args.min_points)
-
-        if k_mkt.size >= min_points:
-            logger.debug(
-                f"Attempting SVI fit with {k_mkt.size} points (min required: {min_points})"
-            )
-            try:
-                fit = M["calibrate_svi_from_quotes"](
-                    k=k_mkt, iv=iv_mkt, T=T, weights=None
-                )
-                a, b, rho, m0, sig = fit.params  # type: ignore[attr-defined]
-                w_model = M["svi_total_variance"](k_mkt, a, b, rho, m0, sig)
-
-                svi_dict = {
-                    "params": list(map(float, fit.params)),
-                    "loss": float(getattr(fit, "loss", float("nan"))),
-                    "n_used": int(getattr(fit, "n_used", k_mkt.size)),
-                    "method": str(getattr(fit, "method", "L-BFGS-B")),
-                }
-                logger.info(f"SVI fit successful: loss={svi_dict['loss']:.6f}")
-                logger.debug(
-                    f"SVI params: {[f'{p:.4f}' for p in svi_dict['params']]}"
-                )
-            except Exception as e:
-                svi_dict = {"error": repr(e)}
-                notes = f"SVI fit failed: {e!r}"
-                logger.error(f"SVI fit failed: {e}")
-        else:
-            svi_dict = {
-                "note": f"Insufficient IV points: {k_mkt.size} < {min_points}"
-            }
-            logger.warning(
-                f"Skipping SVI fit: insufficient data points ({k_mkt.size} < {min_points})"
-            )
-
-        # 7) BL density
-        logger.info(
-            "Step 7/9: Computing Breeden-Litzenberger risk-neutral density..."
-        )
-        bl_dict = None
-        K_pdf = None
-        pdf = None
-        cdf = None
-
-        if (not args.skip_density) and (K.size >= 3):
-            logger.debug(
-                f"Computing BL density with {K.size} call prices, grid size {args.grid_n}"
-            )
-            try:
-                K_pdf, pdf, pdf_diag = M["bl_pdf_from_calls"](
-                    strikes=K,
-                    calls=C_mid,
-                    r=float(r),
-                    T=float(T),
-                    grid_n=args.grid_n,
-                    clip_negative=True,
-                    renormalize=True,
-                )
-                _, cdf = M["build_cdf"](K_pdf, pdf)
-
-                bl_dict = {
-                    "integral": float(
-                        getattr(pdf_diag, "integral", float("nan"))
-                    ),
-                    "neg_frac": float(
-                        getattr(pdf_diag, "neg_frac", float("nan"))
-                    ),
-                    "rn_mean": float(
-                        getattr(pdf_diag, "rn_mean", float("nan"))
-                    ),
-                    "rn_var": float(getattr(pdf_diag, "rn_var", float("nan"))),
-                    "note": str(getattr(pdf_diag, "note", "")),
-                }
-
-                logger.info(
-                    f"BL density computed: integral={bl_dict['integral']:.4f}, "
-                    f"RN mean={bl_dict['rn_mean']:.2f}"
-                )
-
-                if bl_dict['neg_frac'] > 0.01:
-                    logger.warning(
-                        f"High negative density fraction: {bl_dict['neg_frac']:.4f}"
-                    )
-
-            except Exception as e:
-                bl_dict = {"error": repr(e)}
-                notes += f" | BL density failed: {e!r}"
-                logger.error(f"BL density computation failed: {e}")
-        elif args.skip_density:
-            logger.info("Skipping BL density computation (--skip-density)")
-        else:
-            logger.warning(
-                f"Insufficient call data for BL density: {K.size} < 3"
-            )
-
-        # 8) Plots
-        logger.info("Step 8/9: Generating plots...")
-        plots_created = 0
-
-        if k_mkt.size:
-            logger.debug("Creating market IV smile plot...")
-            M["plot_smile"](
-                k=k_mkt,
-                iv=iv_mkt,
-                title=f"{args.underlying} {args.expiry} — market IV",
-                theme=args.theme,
-                save_path=out_dir / "smile_market.png",
-            )
-            plots_created += 1
-
-        if k_mkt.size and w_model is not None and T > 0.0:
-            logger.debug("Creating SVI vs market comparison plot...")
-            iv_model = np.sqrt(np.maximum(w_model, 0.0) / T)
-            M["plot_svi_vs_market"](
-                k=k_mkt,
-                iv_mkt=iv_mkt,
-                iv_model=iv_model,
-                title=f"{args.underlying} {args.expiry} — SVI vs market",
-                theme=args.theme,
-                save_path=out_dir / "smile_model.png",
-            )
-            plots_created += 1
-
-        if K_pdf is not None and pdf is not None:
-            logger.debug("Creating PDF/CDF plot...")
-            marks = {}
-            stats = M["moments_from_pdf"](K_pdf, pdf)
-            if np.isfinite(stats.get("mean", np.nan)):
-                marks["mean"] = float(stats["mean"])
-            M["plot_pdf_cdf"](
-                K=K_pdf,
-                pdf=pdf,
-                cdf=cdf,
-                marks=marks,
-                title=f"{args.underlying} {args.expiry} — RN PDF/CDF",
-                theme=args.theme,
-                save_path=out_dir / "density_pdf_cdf.png",
-            )
-            plots_created += 1
-
-        logger.info(f"Created {plots_created} plots")
-
-        # 9) Save results.json
-        logger.info("Step 9/9: Saving results summary...")
-        results: Dict[str, object] = {
-            "asset_class": args.asset_class,
-            "underlying": args.underlying,
-            "expiry": args.expiry,
-            "asof_utc": asof.isoformat(),
-            "n_quotes": int(df.shape[0]),
-            "n_calls": int(len(calls_df)),
-            "n_iv_points": int(k_mkt.size),
-            "r": float(r),
-            "T": float(T),
-            "F": float(F),
-            "spot": float(spot),
-            "svi": svi_dict,
-            "bl": bl_dict,
-            "plots_created": plots_created,
-            "notes": notes.strip(),
-        }
-        _save_json(out_dir / "results.json", results)
-
-        logger.info(f"Pipeline completed successfully!")
-        logger.info(f"Artifacts written to: {out_dir.resolve()}")
-
-        # Summary statistics
-        logger.info("=" * 50)
-        logger.info("SUMMARY:")
-        logger.info(f"  Data: {len(calls_df)} calls, {k_mkt.size} with IV")
-        logger.info(f"  SVI:  {'✓' if 'params' in svi_dict else '✗'}")
-        logger.info(
-            f"  BL:   {'✓' if bl_dict and 'integral' in bl_dict else '✗'}"
-        )
-        logger.info(f"  Plots: {plots_created} created")
-        logger.info("=" * 50)
-
+        r = float(rf.get_rate(asof.date()))
+        logger.info(f"Risk-free rate: {r:.4f} ({r*100:.2f}%)")
     except Exception as e:
-        logger.error(f"Pipeline failed: {e}")
-        raise
-    finally:
-        # Ensure async resources (e.g., httpx.AsyncClient) are closed before loop ends.
-        await _maybe_aclose(fetcher)
+        r = 0.0
+        logger.warning(f"Failed to get risk-free rate, using 0.0: {e}")
+
+    # Find the actual expiry we fetched (chain is single-expiry)
+    # Your fetchers already respect the requested expiry in quotes; we reuse args.expiry below.
+    target = _parse_expiry_any(args.expiry)
+    T = float(M["yearfrac"](asof, target))
+    logger.info(f"T = {T:.4f} years (~{T*365:.1f} days)")
+
+    # 4) Forward estimate (remove unsupported min_pairs; pass robust args)
+    logger.info("Step 4/9: Estimating forward price...")
+    spot = chain.spot or float("nan")
+    try:
+        F = float(
+            M["estimate_forward"](
+                df,
+                r=r,
+                T=T,
+                price_col="mid",
+                type_col="type",
+                strike_col="strike",
+                top_n=7,
+            )
+        )
+        logger.info(f"Forward (PCP): {F:.4f}")
+    except Exception as e:
+        F = float(spot * exp(r * T)) if np.isfinite(spot) else float(np.nan)
+        logger.warning(
+            f"PCP forward failed; using spot*exp(rT): {F:.4f} | {e}"
+        )
+
+    # 5) Calls and IVs
+    logger.info("Step 5/9: Filtering calls & extracting IVs...")
+    calls_df = df.copy()
+    if "type" in calls_df.columns:
+        t = calls_df["type"].astype(str).str.upper().str.strip()
+        calls_df = calls_df[t.str.startswith("C")]
+    calls_df = calls_df.dropna(subset=["strike", "mid"])
+    logger.info(f"Found {len(calls_df)} call options with valid strike/mid")
+
+    K = calls_df["strike"].to_numpy(float)
+    C_mid = calls_df["mid"].to_numpy(float)
+    k = _log_moneyness(K, F) if np.isfinite(F) and F > 0 else np.array([])
+
+    iv = None
+    if "iv" in calls_df.columns:
+        iv = calls_df["iv"].to_numpy(float)
+        logger.debug("Using 'iv' column")
+    elif "extra" in calls_df.columns:
+        try:
+            iv = np.array(
+                [float((x or {}).get("iv", np.nan)) for x in calls_df["extra"]]
+            )
+            logger.debug("Extracted IVs from 'extra'")
+        except Exception:
+            iv = None
+
+    if iv is not None and k.size:
+        mask = np.isfinite(iv) & np.isfinite(k) & (iv > 0)
+        k_mkt = k[mask]
+        iv_mkt = iv[mask]
+        logger.info(f"Market IV points: {len(iv_mkt)}")
+    else:
+        k_mkt = np.array([])
+        iv_mkt = np.array([])
+        logger.warning("No implied volatilities present or invalid forward")
+
+    # 6) SVI fit
+    logger.info("Step 6/9: Fitting SVI...")
+    w_model = None
+    notes = ""
+    min_points = max(3, args.min_points)
+
+    if k_mkt.size >= min_points:
+        try:
+            fit = M["calibrate_svi_from_quotes"](
+                k=k_mkt, iv=iv_mkt, T=T, weights=None
+            )
+            a, b, rho, m0, sig = fit.params  # type: ignore[attr-defined]
+            w_model = M["svi_total_variance"](k_mkt, a, b, rho, m0, sig)
+            svi_dict = {
+                "params": list(map(float, fit.params)),
+                "loss": float(getattr(fit, "loss", float("nan"))),
+                "n_used": int(getattr(fit, "n_used", k_mkt.size)),
+                "method": str(getattr(fit, "method", "L-BFGS-B")),
+            }
+            logger.info(f"SVI fit OK: loss={svi_dict['loss']:.6f}")
+        except Exception as e:
+            svi_dict = {"error": repr(e)}
+            notes = f"SVI failed: {e!r}"
+            logger.error(f"SVI fit failed: {e}")
+    else:
+        svi_dict = {
+            "note": f"Insufficient IV points: {k_mkt.size} < {min_points}"
+        }
+        logger.warning("Skipping SVI (insufficient data)")
+
+    # 7) BL density
+    logger.info("Step 7/9: Breeden–Litzenberger density...")
+    bl_dict = None
+    K_pdf = None
+    pdf = None
+    cdf = None
+    if (not args.skip_density) and (K.size >= 3):
+        try:
+            K_pdf, pdf, pdf_diag = M["bl_pdf_from_calls"](
+                strikes=K,
+                calls=C_mid,
+                r=float(r),
+                T=float(T),
+                grid_n=args.grid_n,
+                clip_negative=True,
+                renormalize=True,
+            )
+            _, cdf = M["build_cdf"](K_pdf, pdf)
+            bl_dict = {
+                "integral": float(getattr(pdf_diag, "integral", float("nan"))),
+                "neg_frac": float(getattr(pdf_diag, "neg_frac", float("nan"))),
+                "rn_mean": float(getattr(pdf_diag, "rn_mean", float("nan"))),
+                "rn_var": float(getattr(pdf_diag, "rn_var", float("nan"))),
+                "note": str(getattr(pdf_diag, "note", "")),
+            }
+            logger.info(
+                f"BL: ∫pdf={bl_dict['integral']:.4f}, RN mean={bl_dict['rn_mean']:.2f}"
+            )
+        except Exception as e:
+            bl_dict = {"error": repr(e)}
+            notes += f" | BL failed: {e!r}"
+            logger.error(f"BL density failed: {e}")
+    elif args.skip_density:
+        logger.info("Skipping BL density (--skip-density)")
+    else:
+        logger.warning("Insufficient call data for BL density")
+
+    # 8) Plots
+    logger.info("Step 8/9: Generating plots...")
+    plots_created = 0
+    if k_mkt.size:
+        M["plot_smile"](
+            k=k_mkt,
+            iv=iv_mkt,
+            title=f"{args.underlying} {args.expiry} — market IV",
+            theme=args.theme,
+            save_path=Path(args.out) / "smile_market.png",
+        )
+        plots_created += 1
+    if k_mkt.size and w_model is not None and T > 0.0:
+        iv_model = np.sqrt(np.maximum(w_model, 0.0) / T)
+        M["plot_svi_vs_market"](
+            k=k_mkt,
+            iv_mkt=iv_mkt,
+            iv_model=iv_model,
+            title=f"{args.underlying} {args.expiry} — SVI vs market",
+            theme=args.theme,
+            save_path=Path(args.out) / "smile_model.png",
+        )
+        plots_created += 1
+    if "K_pdf" in locals() and K_pdf is not None and pdf is not None:
+        stats = M["moments_from_pdf"](K_pdf, pdf)
+        marks = {}
+        if np.isfinite(stats.get("mean", np.nan)):
+            marks["mean"] = float(stats["mean"])
+        M["plot_pdf_cdf"](
+            K=K_pdf,
+            pdf=pdf,
+            cdf=cdf,
+            marks=marks,
+            title=f"{args.underlying} {args.expiry} — RN PDF/CDF",
+            theme=args.theme,
+            save_path=Path(args.out) / "density_pdf_cdf.png",
+        )
+        plots_created += 1
+    logger.info(f"Created {plots_created} plots")
+
+    # 9) Save results.json
+    logger.info("Step 9/9: Saving results summary...")
+    results: Dict[str, object] = {
+        "asset_class": args.asset_class,
+        "underlying": args.underlying,
+        "expiry": args.expiry,
+        "asof_utc": asof.isoformat(),
+        "n_quotes": int(df.shape[0]),
+        "n_calls": int(len(calls_df)),
+        "n_iv_points": int(k_mkt.size),
+        "r": float(r),
+        "T": float(T),
+        "F": float(F),
+        "spot": float(spot) if np.isfinite(spot) else None,
+        "svi": svi_dict,
+        "bl": bl_dict,
+        "plots_created": plots_created,
+        "notes": notes.strip(),
+    }
+    _save_json(Path(args.out) / "results.json", results)
+
+    logger.info("Pipeline completed successfully!")
+    logger.info(f"Artifacts → {Path(args.out).resolve()}")
+
+
+# ------------------------------ Main entry ----------------------------------
+async def main() -> None:
+    args = _parse_args()
+    if args.dashboard:
+        script_path = Path(args.dashboard_path).resolve()
+        rc = _launch_streamlit_dashboard(
+            script_path, open_browser=args.open_browser
+        )
+        if rc != 0:
+            logger.error(f"Streamlit exited with code {rc}")
+            raise SystemExit(rc)
+        return
+
+    missing = [
+        flag
+        for flag, val in {
+            "--asset-class": args.asset_class,
+            "--underlying": args.underlying,
+            "--expiry": args.expiry,
+        }.items()
+        if not val
+    ]
+    if missing:
+        raise SystemExit(
+            f"Missing required arguments for pipeline mode: {' '.join(missing)}\nTip: use --dashboard to launch the interactive app without these."
+        )
+    await _run_pipeline(args)
 
 
 if __name__ == "__main__":

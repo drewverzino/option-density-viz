@@ -15,6 +15,7 @@ from .historical_loader import (
     save_chain_parquet,
 )
 from .okx_fetcher import OKXFetcher  # crypto (public endpoints)
+from .polygon_fetcher import PolygonFetcher  # equity/crypto via Polygon.io
 from .rate_limit import AsyncRateLimiter, retry_with_backoff
 from .registry import get_fetcher
 from .risk_free import RiskFreeConfig, RiskFreeProvider
@@ -38,4 +39,5 @@ __all__ = [
     "RiskFreeConfig",
     "AsyncRateLimiter",
     "retry_with_backoff",
+    "PolygonFetcher",
 ]

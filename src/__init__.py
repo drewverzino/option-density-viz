@@ -26,8 +26,13 @@ from .data.historical_loader import (
     save_chain_csv,
     save_chain_parquet,
 )
+from .data.okx_fetcher import OKXFetcher  # crypto (public endpoints)
+from .data.polygon_fetcher import (  # equity/crypto via Polygon.io
+    PolygonFetcher,
+)
 from .data.registry import get_fetcher
 from .data.risk_free import RiskFreeConfig, RiskFreeProvider
+from .data.yf_fetcher import YFinanceFetcher  # equity
 
 # Density & CDF helpers
 from .density import (
@@ -63,6 +68,9 @@ from .vol.svi import SVIFit, calibrate_svi_from_quotes
 
 __all__ = [
     # data
+    "OKXFetcher",
+    "YFinanceFetcher",
+    "PolygonFetcher",
     "OptionQuote",
     "OptionChain",
     "OptionFetcher",
