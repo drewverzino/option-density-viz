@@ -1,6 +1,3 @@
-# src/data/yf_fetcher.py
-from __future__ import annotations
-
 """
 Equity backend using yfinance.
 
@@ -14,10 +11,12 @@ Threading:
   the rest of our code can be async.
 """
 
+from __future__ import annotations
+
 import asyncio
 import math
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 import yfinance as yf
 

@@ -1,6 +1,3 @@
-# src/data/base.py
-from __future__ import annotations
-
 """
 Core types and the fetcher protocol used throughout the project.
 
@@ -14,6 +11,8 @@ Tip:
 - Keep these types tiny and stable; downstream code (preprocess/vol/density/viz)
   depends on them heavily.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -84,6 +83,7 @@ class OptionFetcher(Protocol):
     """
 
     async def list_expiries(self, underlying: str) -> List[datetime]: ...
+
     async def fetch_chain(
         self, underlying: str, expiry: datetime
     ) -> OptionChain: ...

@@ -1,40 +1,35 @@
-# src/preprocess/__init__.py
 """
-Preprocessing utilities (quote cleaning, parity, forward/log-moneyness).
+Preprocessing exports (mids, PCP, forwards & log-moneyness).
+"""
 
-Public API
-----------
-- add_midprice_columns(df, ...): compute robust mids, rel. spreads, and flags
-- synth_put_from_call(...), synth_call_from_put(...): PCP synthetic legs
-- pcp_residual(...): parity residual (diagnostics)
-- pivot_calls_puts_by_strike(df, ...): C/P wide table by strike
-- add_pcp_diagnostics(df, ...): per-strike residuals + synthetic legs
-- forward_price(...), log_moneyness(...)
-- estimate_forward_from_chain(df, ...): forward from PCP pairs (robust)
-"""
+from __future__ import annotations
 
 from .forward import (
     estimate_forward_from_chain,
-    forward_price,
+    estimate_forward_from_pcp,
+    forward_from_carry,
     log_moneyness,
+    yearfrac,
 )
 from .midprice import add_midprice_columns
 from .pcp import (
-    add_pcp_diagnostics,
-    pcp_residual,
     pivot_calls_puts_by_strike,
+    residuals_from_parity,
     synth_call_from_put,
     synth_put_from_call,
+    synthesize_missing_leg,
 )
 
 __all__ = [
     "add_midprice_columns",
+    "pivot_calls_puts_by_strike",
+    "residuals_from_parity",
+    "synthesize_missing_leg",
     "synth_put_from_call",
     "synth_call_from_put",
-    "pcp_residual",
-    "pivot_calls_puts_by_strike",
-    "add_pcp_diagnostics",
-    "forward_price",
+    "yearfrac",
     "log_moneyness",
+    "forward_from_carry",
     "estimate_forward_from_chain",
+    "estimate_forward_from_pcp",
 ]

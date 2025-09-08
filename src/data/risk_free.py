@@ -1,6 +1,3 @@
-# src/data/risk_free.py
-from __future__ import annotations
-
 """
 Simple risk-free rate provider.
 
@@ -14,6 +11,8 @@ CSV format:
     2025-01-02,0.0525
     2025-01-03,0.0526
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime

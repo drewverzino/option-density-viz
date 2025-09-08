@@ -1,12 +1,19 @@
-"""Risk-neutral density extraction: BL, CDF/quantiles."""
+"""Density package exports."""
 
-try:
-    from .bl import bl_density
-except Exception:
-    pass
-try:
-    from .cdf import cdf, inv_cdf
-except Exception:
-    pass
+from __future__ import annotations
 
-__all__ = [n for n in ["bl_density", "cdf", "inv_cdf"] if n in globals()]
+from .bl import (
+    BLDiagnostics,
+    bl_pdf_from_calls,
+    bl_pdf_from_calls_nonuniform,
+)
+from .cdf import build_cdf, moments_from_pdf, ppf_from_cdf
+
+__all__ = [
+    "bl_pdf_from_calls",
+    "bl_pdf_from_calls_nonuniform",
+    "BLDiagnostics",
+    "build_cdf",
+    "ppf_from_cdf",
+    "moments_from_pdf",
+]

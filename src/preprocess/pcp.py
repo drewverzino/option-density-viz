@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Put–Call Parity (PCP) utilities.
 
@@ -14,11 +12,12 @@ Assumptions:
 - PCP with dividend yield q: C - P = S*e^{-qT} - K*e^{-rT}. The forward is F = S*e^{(r-q)T}.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+# -------------------------- synthesis formulas -------------------------- #
 
 
 def synth_put_from_call(
@@ -33,6 +32,28 @@ def synth_call_from_put(
 ) -> float:
     """C = P + S e^{-qT} - K e^{-rT}"""
     return float(put + S * np.exp(-q * T) - K * np.exp(-r * T))
+
+
+# ---------------------------- residual checks --------------------------- #
+
+
+def residuals_from_parity(
+    S: float,
+    K: float,
+    r: float,
+    T: float,
+    call: float,
+    put: float,
+    q: float = 0.0,
+) -> float:
+    """
+    PCP residual:
+        res = C + K e^{-rT} - (P + S e^{-qT})
+
+    - res = 0 : exact parity.
+    - res > 0 : call side rich vs put side (given S, r, q).
+    """
+    return float(call + K * np.exp(-r * T) - (put + S * np.exp(-q * T)))
 
 
 def pcp_residual(
@@ -132,6 +153,9 @@ def add_pcp_diagnostics(
         index=wide.index,
     )
     return out.sort_index()
+
+
+# ------------------------ synth missing leg (API) ----------------------- #
 
 
 def synthesize_missing_leg(

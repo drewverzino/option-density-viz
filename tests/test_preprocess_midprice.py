@@ -13,8 +13,8 @@ def test_midprice_basic():
     out = add_midprice_columns(df, wide_rel_threshold=0.15)
     # Row 0: both sides -> mid = 1.1, rel_spread ~ 0.1818 -> wide True
     assert abs(out["mid"][0] - 1.1) < 1e-9
-    assert out["crossed"][0] is False
-    assert out["wide"][0] is True
+    assert out["crossed"][0] == False
+    assert out["wide"][0] == True
 
     # Row 1: bid only -> mid = bid
     assert out["side_used"][1] == "bid_only"
@@ -25,7 +25,7 @@ def test_midprice_basic():
     assert abs(out["mid"][2] - 1.5) < 1e-9
 
     # Row 3: crossed (bid 2.0 > ask 1.0)
-    assert out["crossed"][3] is True
+    assert out["crossed"][3] == True
 
     # Row 4: both sides OK
     assert out["side_used"][4] == "both"

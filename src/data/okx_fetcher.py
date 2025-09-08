@@ -1,6 +1,3 @@
-# src/data/okx_fetcher.py
-from __future__ import annotations
-
 """
 Crypto options backend using OKX public API, with optional private (signed) calls.
 
@@ -15,6 +12,8 @@ Important:
 - Keep your API key/secret/passphrase in a .env (never commit secrets).
 - For research, a read-only key is sufficient.
 """
+
+from __future__ import annotations
 
 import asyncio
 import base64

@@ -1,6 +1,3 @@
-# src/data/historical_loader.py
-from __future__ import annotations
-
 """
 Helpers to save and load OptionChain objects to/from CSV/Parquet.
 
@@ -13,10 +10,11 @@ Notes:
 - We store a thin, human-readable schema that mirrors OptionQuote + some chain fields.
 """
 
-from dataclasses import asdict
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List
 
 import pandas as pd
 

@@ -1,67 +1,105 @@
-# src/__init__.py
 """
-Option Viz (src-layout package root).
+Top-level package exports for option-density-viz.
 
-This file is optional in a src-layout repo. We keep it lean and provide
-convenience re-exports so you *may* do:
+These re-exports make common imports concise, e.g.:
 
-    import src as ov
-    chain = await ov.get_fetcher("equity").fetch_chain("AAPL", expiry)
+    from option_density_viz import (
+        OptionQuote, OptionChain, get_fetcher,
+        add_midprice_columns, estimate_forward_from_chain,
+        calibrate_svi_from_quotes, fit_surface_from_frames,
+        bl_pdf_from_calls, build_cdf,
+    )
 
-But the recommended import style in this repo remains:
-
-    from data.registry import get_fetcher
-    from preprocess.midprice import add_midprice_columns
-    ...
-
-Notes
------
-- The project uses a `src/` layout. Ensure the `src` directory is on `PYTHONPATH`
-  (the notebooks do this automatically).
-- Subpackages like `data`, `preprocess`, `vol`, `density`, `viz` are meant to be
-  imported directly (e.g., `from data.base import OptionChain`). This file does
-  not change that.
+Keep lines < 79 chars to satisfy linters.
 """
+
+from __future__ import annotations
+
+# Data layer
+from .data.base import OptionChain, OptionFetcher, OptionQuote
+from .data.cache import KVCache
+from .data.historical_loader import (
+    chain_to_dataframe,
+    dataframe_to_chain,
+    load_chain_csv,
+    load_chain_parquet,
+    save_chain_csv,
+    save_chain_parquet,
+)
+from .data.registry import get_fetcher
+from .data.risk_free import RiskFreeConfig, RiskFreeProvider
+
+# Density & CDF helpers
+from .density import (
+    BLDiagnostics,
+    bl_pdf_from_calls,
+    bl_pdf_from_calls_nonuniform,
+    build_cdf,
+    moments_from_pdf,
+    ppf_from_cdf,
+)
+from .preprocess.forward import (
+    estimate_forward_from_chain,
+    estimate_forward_from_pcp,
+    forward_from_carry,
+    log_moneyness,
+    yearfrac,
+)
+
+# Preprocess
+from .preprocess.midprice import add_midprice_columns
+from .preprocess.pcp import (
+    pivot_calls_puts_by_strike,
+    residuals_from_parity,
+    synth_call_from_put,
+    synth_put_from_call,
+    synthesize_missing_leg,
+)
+from .vol.no_arb import butterfly_violations, calendar_violations
+from .vol.surface import fit_surface_from_frames, smooth_params
+
+# Volatility modelling
+from .vol.svi import SVIFit, calibrate_svi_from_quotes
 
 __all__ = [
-    # Top-level types
+    # data
     "OptionQuote",
     "OptionChain",
     "OptionFetcher",
-    # Factory / providers
     "get_fetcher",
+    "chain_to_dataframe",
+    "dataframe_to_chain",
+    "save_chain_csv",
+    "save_chain_parquet",
+    "load_chain_csv",
+    "load_chain_parquet",
+    "KVCache",
     "RiskFreeProvider",
     "RiskFreeConfig",
-    # Preprocess convenience
-    "preprocess",
+    # preprocess
+    "add_midprice_columns",
+    "pivot_calls_puts_by_strike",
+    "residuals_from_parity",
+    "synthesize_missing_leg",
+    "synth_put_from_call",
+    "synth_call_from_put",
+    "yearfrac",
+    "log_moneyness",
+    "forward_from_carry",
+    "estimate_forward_from_chain",
+    "estimate_forward_from_pcp",
+    # vol
+    "SVIFit",
+    "calibrate_svi_from_quotes",
+    "butterfly_violations",
+    "calendar_violations",
+    "fit_surface_from_frames",
+    "smooth_params",
+    # density
+    "bl_pdf_from_calls",
+    "bl_pdf_from_calls_nonuniform",
+    "BLDiagnostics",
+    "build_cdf",
+    "ppf_from_cdf",
+    "moments_from_pdf",
 ]
-
-__version__ = "0.1.0"
-
-# Re-export core data types & factory
-try:
-    from data.base import OptionChain, OptionFetcher, OptionQuote
-except Exception:  # pragma: no cover - guard for partial installs
-    OptionQuote = OptionChain = OptionFetcher = None  # type: ignore
-
-try:
-    from data.registry import get_fetcher
-except Exception:  # pragma: no cover
-
-    def get_fetcher(*args, **kwargs):  # type: ignore
-        raise ImportError(
-            "data.registry.get_fetcher is not available on PYTHONPATH"
-        )
-
-
-# Risk-free provider
-try:
-    from data.risk_free import RiskFreeConfig, RiskFreeProvider
-except Exception:  # pragma: no cover
-    RiskFreeProvider = RiskFreeConfig = None  # type: ignore
-
-# Namespace import for preprocess (so users can do `src.preprocess.add_midprice_columns` if they want)
-try:
-    from . import preprocess  # type: ignore
-except Exception:  # pragma: no cover
-    preprocess = None  # type: ignore

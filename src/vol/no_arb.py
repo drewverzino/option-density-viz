@@ -1,6 +1,3 @@
-# src/vol/no_arb.py
-from __future__ import annotations
-
 """
 No-arbitrage diagnostics for smiles and surfaces.
 
@@ -21,6 +18,8 @@ What this module provides
 - calendar_violations(k, w_T1, w_T2, tol):
     Fraction and gaps where w(k, T2) < w(k, T1) by more than tol.
 """
+
+from __future__ import annotations
 
 from typing import Any, Dict
 

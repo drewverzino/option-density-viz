@@ -1,6 +1,3 @@
-# src/data/registry.py
-from __future__ import annotations
-
 """
 Factory for returning a concrete data backend behind the OptionFetcher protocol.
 
@@ -9,6 +6,8 @@ Why a registry:
   instead of importing backend modules everywhere.
 - Encapsulates backend selection and any construction defaults in one place.
 """
+
+from __future__ import annotations
 
 from typing import Literal
 

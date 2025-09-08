@@ -1,457 +1,422 @@
-# src/vol/svi.py
+"""
+SVI (Stochastic Volatility Inspired) calibration utilities.
+
+This module fits *per-expiry* SVI parameters to observed implied
+volatility smiles expressed in *log-moneyness* k and *total variance*
+w = sigma^2 * T.
+
+Key ideas:
+- We fit in *total variance* space (not IV) because SVI is linear in T
+  and many no-arbitrage properties are easier to reason about in w.
+- To approximate *price-space* least squares while still fitting w,
+  we optionally weight residuals by the Black-76 *vega* and the chain
+  rule factor d sigma / d w = 1 / (2 T sigma). See `_price_weights`.
+- We expose one public entry point:
+    `calibrate_svi_from_quotes(k, w=..., iv=..., T=..., ...) -> SVIFit`
+  which returns a small dataclass with parameters and diagnostics.
+
+Notation:
+- k = log-moneyness = ln(K/F) (we adopt the market convention K/F, so
+  negative k means ITM calls / OTM puts).
+- w(k) = a + b * { rho * (k - m) + sqrt((k - m)^2 + sigma^2) }
+  with constraints:
+    b > 0, sigma > 0, |rho| < 1.  (We also clamp rho to (-0.999, 0.999))
+- T is year-fraction to expiry (ACT/365.25 in the rest of the repo).
+
+References:
+- Gatheral, "The Volatility Surface: A Practitioner's Guide".
+- SVI parameterization used industry-wide for robust smile fitting.
+"""
+
 from __future__ import annotations
 
-"""
-SVI calibration (single-expiry smile) with vega-weighted least squares.
-
-What this module does
----------------------
-1) Converts a preprocessed quote DataFrame into:
-   - k  : log-moneyness, k = ln(K / F)
-   - w  : total variance, w = sigma^2 * T
-   - wts: per-point weights (Black-76 vega), so ATM has more influence
-2) Fits SVI total-variance function
-      w(k) = a + b * ( rho*(k - m) + sqrt((k - m)^2 + sigma^2) )
-   using L-BFGS-B with safe bounds and multiple seeds.
-
-Why vega weights?
------------------
-Vega is largest near ATM and small deep ITM/OTM. Weighting by vega targets
-the fit where the market is most informative, and de-emphasizes noisy
-wings.
-
-Inputs you need
----------------
-- Forward F for this expiry (estimate via preprocess.forward).
-- Year fraction T and continuously compounded rate r.
-- A DataFrame with at least: strike, type ('C' or 'P'), mid price.
-  Optional 'iv' column (precomputed implied vol); if absent we solve IV.
-
-Key entry points
-----------------
-- prepare_smile_data(...): build (k, w, weights)
-- fit_svi(...): return calibrated SVI parameters (SVIFit)
-- svi_w(...): evaluate the SVI total-variance function
-"""
-
-import math
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
+from numpy.typing import ArrayLike
+from scipy.optimize import minimize
 
-try:
-    # SciPy is required for optimization and root solving
-    from scipy.optimize import brentq, minimize
-except Exception as e:  # pragma: no cover
-    raise ImportError("scipy is required for SVI calibration") from e
-
-
-# ------------------------- Black-76 helpers -------------------------
-
-
-SQRT2 = math.sqrt(2.0)
-
-
-def _phi(x: np.ndarray) -> np.ndarray:
-    """Standard normal pdf."""
-    return (1.0 / math.sqrt(2.0 * math.pi)) * np.exp(-0.5 * x * x)
-
-
-def _Phi(x: np.ndarray) -> np.ndarray:
-    """Standard normal cdf via erf (vectorized)."""
-    return 0.5 * (1.0 + np.erf(x / SQRT2))
-
-
-def black_d1_d2(
-    F: float, K: float, sigma: float, T: float
-) -> Tuple[float, float]:
-    """
-    Compute d1, d2 under Black-76. Returns NaNs if inputs are degenerate
-    (e.g., T<=0, sigma<=0, or non-positive F/K).
-    """
-    if sigma <= 0.0 or T <= 0.0 or F <= 0.0 or K <= 0.0:
-        return float("nan"), float("nan")
-    vol_sqrt_T = sigma * math.sqrt(T)
-    d1 = (math.log(F / K) + 0.5 * sigma * sigma * T) / vol_sqrt_T
-    d2 = d1 - vol_sqrt_T
-    return d1, d2
-
-
-def black_price(
-    F: float, K: float, sigma: float, T: float, r: float, opt_type: str
-) -> float:
-    """
-    Black-76 forward price discounted by exp(-rT).
-    Falls back to intrinsic value when sigma≈0 to avoid NaNs.
-    """
-    Df = math.exp(-r * T)
-    d1, d2 = black_d1_d2(F, K, sigma, T)
-    if not np.isfinite(d1) or not np.isfinite(d2):
-        # sigma ~ 0 fallback: intrinsic value
-        if str(opt_type).upper().startswith("C"):
-            return Df * max(F - K, 0.0)
-        return Df * max(K - F, 0.0)
-
-    if str(opt_type).upper().startswith("C"):
-        return Df * (F * _Phi(d1) - K * _Phi(d2))
-    return Df * (K * _Phi(-d2) - F * _Phi(-d1))
-
-
-def black_vega(F: float, K: float, sigma: float, T: float, r: float) -> float:
-    """
-    Forward vega under Black-76.
-    If sigma or T are non-positive, or d1 is NaN, returns 0 (no weight).
-    """
-    if sigma <= 0.0 or T <= 0.0:
-        return 0.0
-    Df = math.exp(-r * T)
-    d1, _ = black_d1_d2(F, K, sigma, T)
-    if not np.isfinite(d1):
-        return 0.0
-    return Df * F * math.sqrt(T) * float(_phi(np.array([d1]))[0])
-
-
-def implied_vol_black(
-    price: float, F: float, K: float, T: float, r: float, opt_type: str
-) -> float:
-    """
-    Compute Black-76 implied vol by bracketing on [1e-8, 5] and using Brent.
-
-    Returns NaN if:
-    - inputs are invalid (e.g., price<=0, T<=0);
-    - the target price is not in the achievable price range;
-    - the bracket fails to sign-change (no root).
-    """
-    if price <= 0.0 or F <= 0.0 or K <= 0.0 or T <= 0.0:
-        return float("nan")
-
-    Df = math.exp(-r * T)
-
-    # Tight theoretical bounds on call/put values under Black-76.
-    if str(opt_type).upper().startswith("C"):
-        lo_price = Df * max(F - K, 0.0)  # intrinsic, sigma -> 0
-        hi_price = Df * F  # sigma -> inf (call cap)
-    else:
-        lo_price = Df * max(K - F, 0.0)
-        hi_price = Df * K
-
-    if not (lo_price <= price <= hi_price):
-        return float("nan")
-
-    def f(sig: float) -> float:
-        return black_price(F, K, sig, T, r, opt_type) - price
-
-    a, b = 1e-8, 5.0
-    try:
-        fa, fb = f(a), f(b)
-        # If the bracket does not straddle zero, give up cleanly.
-        if math.isnan(fa) or math.isnan(fb) or fa * fb > 0.0:
-            return float("nan")
-        return float(brentq(f, a, b, maxiter=100, xtol=1e-8))
-    except Exception:
-        return float("nan")
-
-
-# ----------------------------- SVI core -----------------------------
-
-
-def svi_w(
-    k: np.ndarray, a: float, b: float, rho: float, m: float, sigma: float
-) -> np.ndarray:
-    """
-    SVI total variance w(k) in the "raw" (not-J-W) parameterization.
-
-    Parameters
-    ----------
-    k : array
-        Log-moneyness grid ln(K/F).
-    a, b, rho, m, sigma : floats
-        SVI parameters (bounded during calibration).
-
-    Returns
-    -------
-    w : array
-        Total variance on the same grid.
-    """
-    x = k - m
-    return a + b * (rho * x + np.sqrt(x * x + sigma * sigma))
+# ------------------------------ Data Types ------------------------------ #
 
 
 @dataclass
 class SVIFit:
     """
-    Container for SVI fit results.
-    - (a, b, rho, m, sigma): fitted parameters
-    - loss: objective value (weighted MSE in w)
-    - n_used: number of points used in the fit
-    - notes: small status message ("ok" or solver details)
+    Container for a single-expiry SVI fit.
+
+    Attributes
+    ----------
+    params : tuple[float, float, float, float, float]
+        (a, b, rho, m, sigma) SVI parameters.
+    loss : float
+        Root-mean-squared residual in the objective space (after weights).
+    n_used : int
+        Number of quotes actually used in the fit after filtering.
+    method : str
+        Name of the optimizer (e.g., 'L-BFGS-B').
+    notes : str
+        Human-readable comments about bounds, seeds, or any fallback.
     """
 
-    a: float
-    b: float
-    rho: float
-    m: float
-    sigma: float
+    params: Tuple[float, float, float, float, float]
     loss: float
     n_used: int
+    method: str = "L-BFGS-B"
     notes: str = ""
 
-    def as_tuple(self) -> Tuple[float, float, float, float, float]:
-        """Return parameters as a 5-tuple in the usual order."""
-        return (self.a, self.b, self.rho, self.m, self.sigma)
+
+# ------------------------------ Math Utils ------------------------------ #
+
+SQRT2PI = np.sqrt(2.0 * np.pi)
 
 
-def prepare_smile_data(
-    df,
-    *,
-    T: float,
-    r: float,
-    F: float,
-    price_col: str = "mid",
-    type_col: str = "type",
-    strike_col: str = "strike",
-    iv_col: Optional[str] = None,
-    use_flags: bool = True,
-    crossed_col: str = "crossed",
-    wide_col: str = "wide",
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _phi(x: np.ndarray | float) -> np.ndarray | float:
+    """Standard normal PDF φ(x)."""
+    return np.exp(-0.5 * np.square(x)) / SQRT2PI
+
+
+def _ensure_1d(a: ArrayLike, name: str) -> np.ndarray:
+    """Convert to 1D float array and sanity-check finite-ness."""
+    x = np.asarray(a, dtype=float).reshape(-1)
+    if x.size == 0:
+        raise ValueError(f"{name} must be non-empty")
+    if not np.isfinite(x).any():
+        raise ValueError(f"{name} has no finite values")
+    return x
+
+
+def _filter_finite(*arrs: np.ndarray) -> Tuple[np.ndarray, ...]:
+    """Keep positions where *all* arrays are finite."""
+    m = np.logical_and.reduce([np.isfinite(a) for a in arrs])
+    return tuple(a[m] for a in arrs)
+
+
+# ------------------------------ SVI Model ------------------------------- #
+
+
+def svi_total_variance(
+    k: np.ndarray,
+    a: float,
+    b: float,
+    rho: float,
+    m: float,
+    sigma: float,
+) -> np.ndarray:
     """
-    Build (k, w, weights) for SVI from a quotes DataFrame.
+    SVI total variance function:
 
-    Steps
-    -----
-    1) Drop rows missing price/strike. Optionally drop rows flagged as
-       crossed or wide (produced by preprocess.midprice).
-    2) Use column `iv` if present and finite; otherwise compute Black-76
-       implied vol by solving price(mid) -> sigma.
-    3) Compute log-moneyness k = ln(K/F) and total variance w = sigma^2*T.
-    4) Weight each point by Black-76 vega. If vega=0 or invalid, use 1.
+        w(k) = a + b * { rho * (k - m) + sqrt((k - m)^2 + sigma^2) }.
 
-    Returns
-    -------
-    (k, w, wts) as numpy arrays. Empty arrays if nothing survives filters.
+    Parameters must satisfy: b > 0, sigma > 0, |rho| < 1 for sane shapes.
     """
-    import pandas as pd
-
-    if not isinstance(df, pd.DataFrame):  # pragma: no cover
-        raise TypeError("df must be a pandas DataFrame")
-
-    d = df.copy()
-    d = d.dropna(subset=[price_col, strike_col])
-
-    # Remove obviously bad quotes (if flags exist).
-    if use_flags:
-        if crossed_col in d.columns:
-            d = d[~d[crossed_col].astype(bool)]
-        if wide_col in d.columns:
-            d = d[~d[wide_col].astype(bool)]
-    if len(d) == 0:
-        return np.array([]), np.array([]), np.array([])
-
-    # Normalize type to 'C'/'P' single letters.
-    if type_col in d.columns:
-        t = d[type_col].astype(str).str.upper().str[0]
-    else:
-        t = pd.Series(["C"] * len(d), index=d.index)
-
-    K = d[strike_col].astype(float).to_numpy()
-    P = d[price_col].astype(float).to_numpy()
-
-    # If an IV column exists, prefer it; else solve.
-    iv_series = (
-        d[iv_col].astype(float) if (iv_col and iv_col in d.columns) else None
-    )
-
-    sigmas = np.empty_like(P, dtype=float)
-    sigmas.fill(np.nan)
-
-    for i in range(len(P)):
-        # Use supplied IV if good; otherwise, solve for IV.
-        iv_guess = (
-            float(iv_series.iloc[i]) if iv_series is not None else float("nan")
-        )
-        if np.isfinite(iv_guess) and iv_guess > 0.0:
-            sigmas[i] = iv_guess
-        else:
-            sigmas[i] = implied_vol_black(P[i], F, K[i], T, r, t.iloc[i])
-
-    # Keep only valid (positive) vols and strikes.
-    mask = np.isfinite(sigmas) & (sigmas > 0.0) & np.isfinite(K) & (K > 0.0)
-    K = K[mask]
-    sigmas = sigmas[mask]
-    if len(sigmas) == 0:
-        return np.array([]), np.array([]), np.array([])
-
-    k = np.log(K / float(F))
-    w = (sigmas * sigmas) * float(T)
-
-    # Vega weights: if vega is invalid or 0 -> fallback to 1.
-    wts = np.empty_like(sigmas, dtype=float)
-    for i in range(len(sigmas)):
-        v = black_vega(F, K[i], float(sigmas[i]), T, r)
-        wts[i] = v if np.isfinite(v) and v > 0.0 else 1.0
-    return k, w, wts
+    x = k - m
+    return a + b * (rho * x + np.sqrt(np.square(x) + sigma * sigma))
 
 
-def _default_bounds() -> Dict[str, Tuple[float, float]]:
-    """
-    Conservative box constraints. They keep the optimizer away from
-    degenerate values but are wide enough for crypto/equity smiles.
-    """
-    return {
-        "a": (1e-8, 5.0),
-        "b": (1e-8, 10.0),
-        "rho": (-0.999, 0.999),
-        "m": (-2.5, 2.5),
-        "sigma": (1e-8, 5.0),
-    }
-
-
-def _unpack(x: np.ndarray) -> Dict[str, float]:
-    """Turn a parameter vector into a dict with named fields."""
-    return {
-        "a": float(x[0]),
-        "b": float(x[1]),
-        "rho": float(x[2]),
-        "m": float(x[3]),
-        "sigma": float(x[4]),
-    }
-
-
-def _seed_grid(k: np.ndarray, w: np.ndarray) -> np.ndarray:
-    """
-    Build a small seed grid for (a, b, rho, m, sigma).
-
-    Intuition:
-    - a ~ min total variance (kept small, but >0)
-    - b ~ curvature level; use std(w) as a rough scale
-    - m, rho shape the skew; we try a handful of plausible pairs
-    - sigma is the "kink" softness; start moderate
-    """
-    a0 = max(1e-4, float(np.nanmin(w)) * 0.7)
-    b0 = max(1e-3, float(np.nanstd(w)))
-    sigma0 = 0.2
-    m_vals = np.array([-0.2, 0.0, 0.2])
-    rho_vals = np.array([-0.5, -0.2, 0.0, 0.2])
-    seeds = []
-    for m in m_vals:
-        for rho in rho_vals:
-            seeds.append(np.array([a0, b0, rho, m, sigma0], dtype=float))
-    return np.vstack(seeds)
-
-
-def fit_svi(
+def _price_weights(
     k: np.ndarray,
     w: np.ndarray,
-    weights: Optional[np.ndarray] = None,
-    bounds: Optional[Dict[str, Tuple[float, float]]] = None,
-    seeds: Optional[np.ndarray] = None,
+    *,
+    F: Optional[float],
+    T: Optional[float],
+    r: float = 0.0,
+) -> np.ndarray:
+    """
+    Compute weights that approximate *price-space* LS while fitting
+    in total-variance space.
+
+    Heuristic:
+      price residual ≈ vega * Δsigma,
+      and Δsigma = (d sigma / d w) * Δw  with  d sigma / d w = 1/(2 T sigma).
+      => price residual ≈ vega * Δw / (2 T sigma)
+
+    So we weight the w-residual by  vega / (2 T sigma).
+    If F or T is None, or w has very small/negative values, we fall back
+    to unit weights.
+
+    Black-76 ingredients:
+      K = F * exp(k),
+      Df = exp(-r T),
+      sigma = sqrt(w / T),
+      d1 = [ln(F/K) + 0.5 sigma^2 T] / (sigma sqrt(T)) = (-k + 0.5 w)/sqrt(w),
+      vega = Df * F * sqrt(T) * φ(d1).
+    """
+    if F is None or T is None or T <= 0.0:
+        return np.ones_like(k, dtype=float)
+
+    w_pos = np.maximum(w, 1e-12)
+    sigma = np.sqrt(w_pos / T)
+    rootw = np.sqrt(w_pos)
+    # Avoid division by zero for tiny w
+    rootw = np.maximum(rootw, 1e-9)
+
+    d1 = (-k + 0.5 * w_pos) / rootw
+    vega = np.exp(-r * T) * F * np.sqrt(T) * _phi(d1)
+
+    denom = 2.0 * T * sigma
+    denom = np.where(denom <= 1e-12, 1e-12, denom)
+
+    wts = vega / denom
+    # Normalize weights to have median ~ 1 for numerical stability.
+    med = np.median(wts[wts > 0])
+    if np.isfinite(med) and med > 0.0:
+        wts = wts / med
+    else:
+        wts = np.ones_like(k, dtype=float)
+    return wts
+
+
+# ------------------------------ Calibration ---------------------------- #
+
+
+def _initial_bounds_from_data(
+    k: np.ndarray,
+    w: np.ndarray,
+) -> Tuple[Tuple[float, float], ...]:
+    """
+    Construct conservative bounds using only data ranges.
+
+    We pick:
+      a     in [1e-8, max(w)]
+      b     in [1e-6, 10.0]             (slope scale)
+      rho   in [-0.999, 0.999]          (skew)
+      m     in [k_min - 1.0, k_max + 1.0] (horizontal shift)
+      sigma in [1e-6, 5.0]              (wing curvature scale)
+    """
+    kmin, kmax = float(np.min(k)), float(np.max(k))
+    wmax = float(np.max(np.maximum(w, 1e-12)))
+    bounds = (
+        (1e-8, max(1e-6, wmax)),  # a
+        (1e-6, 10.0),  # b
+        (-0.999, 0.999),  # rho
+        (kmin - 1.0, kmax + 1.0),  # m
+        (1e-6, 5.0),  # sigma
+    )
+    return bounds
+
+
+def _seed_grid_from_data(
+    k: np.ndarray,
+    w: np.ndarray,
+    bounds: Sequence[Tuple[float, float]],
+    grid_size: int = 5,
+) -> Iterable[Tuple[float, float, float, float, float]]:
+    """
+    Generate a small set of diverse seeds informed by data.
+
+    Heuristics:
+      - a: start near min(w) and ~median(w)
+      - b: small to moderate slopes in [0.1, 2.0]
+      - rho: {-0.75, -0.25, 0.0, 0.25, 0.75} truncated to bounds
+      - m: around median(k) ± a few quantiles
+      - sigma: {0.05, 0.15, 0.3, 0.6} clipped to bounds
+    """
+    k_med = float(np.median(k))
+    a_low = float(np.percentile(w, 10))
+    a_med = float(np.percentile(w, 50))
+    a_hi = float(np.percentile(w, 80))
+
+    a_vals = [a_low, a_med, a_hi]
+    b_vals = [0.1, 0.3, 0.7, 1.5]
+    rho_vals = [-0.75, -0.25, 0.0, 0.25, 0.75]
+    m_vals = [k_med - 0.5, k_med, k_med + 0.5]
+    sig_vals = [0.05, 0.15, 0.3, 0.6]
+
+    # Clip to bounds to avoid invalid seeds
+    (a_lo, a_hi_b), (b_lo, b_hi), (r_lo, r_hi), (m_lo, m_hi), (s_lo, s_hi) = (
+        bounds
+    )
+    a_vals = [float(np.clip(x, a_lo, a_hi_b)) for x in a_vals]
+    b_vals = [float(np.clip(x, b_lo, b_hi)) for x in b_vals]
+    rho_vals = [float(np.clip(x, r_lo, r_hi)) for x in rho_vals]
+    m_vals = [float(np.clip(x, m_lo, m_hi)) for x in m_vals]
+    sig_vals = [float(np.clip(x, s_lo, s_hi)) for x in sig_vals]
+
+    seeds = []
+    for a0 in a_vals:
+        for b0 in b_vals:
+            for r0 in rho_vals:
+                for m0 in m_vals:
+                    for s0 in sig_vals:
+                        seeds.append((a0, b0, r0, m0, s0))
+                        if len(seeds) >= max(grid_size, 1) * 25:
+                            # Keep the grid from exploding; still diverse
+                            return seeds
+    return seeds
+
+
+def calibrate_svi_from_quotes(
+    k: ArrayLike,
+    w: Optional[ArrayLike] = None,
+    *,
+    iv: Optional[ArrayLike] = None,
+    T: Optional[float] = None,
+    weights: Optional[ArrayLike] = None,
+    use_price_weighting: bool = True,
+    F: Optional[float] = None,
+    r: float = 0.0,
+    bounds: Optional[Sequence[Tuple[float, float]]] = None,
+    seed: Optional[Tuple[float, float, float, float, float]] = None,
+    grid_seeds: bool = True,
+    grid_size: int = 5,
+    reg_lambda: float = 0.0,
 ) -> SVIFit:
     """
-    Fit SVI by minimizing vega-weighted MSE in total variance.
+    Fit SVI to a single-expiry smile.
 
-    Objective
-    ---------
-      minimize  sum_i weights_i * ( w_i - w_svi(k_i) )^2  / n_used
+    Provide either:
+      - w (total variance) directly, or
+      - iv (implied vol) and T, so we compute w = iv^2 * T.
 
-    Notes
-    -----
-    - We prefilter non-finite values and require at least 6 points.
-    - If no weights are provided we use ones.
-    - We search from a small grid of seeds and keep the best result.
+    Parameters
+    ----------
+    k : array-like
+        Log-moneyness values ln(K/F). (1D)
+    w : array-like, optional
+        Total variance at the same points. (1D)
+    iv : array-like, optional
+        Implied vol at the same points. Used if w is None.
+    T : float, optional
+        Year fraction to expiry. Required if iv is provided and w is None.
+    weights : array-like, optional
+        Custom weights per point (1D). Overrides price-weighting if given.
+    use_price_weighting : bool
+        If True and weights is None, compute vega-based weights using F, T.
+    F : float, optional
+        Forward level for the expiry (used for price-weighting).
+    r : float
+        Continuously-compounded rate (only for vega/discount).
+    bounds : sequence of (lo, hi), optional
+        Bounds for (a,b,rho,m,sigma). If None, derived from data.
+    seed : tuple[5], optional
+        Initial guess (a,b,rho,m,sigma). If None, we use a small seed grid.
+    grid_seeds : bool
+        Try a handful of diverse seeds (robust) before local refine.
+    grid_size : int
+        Controls the size of the seed grid (roughly).
+    reg_lambda : float
+        Optional L2 regularization strength applied to parameters
+        (weak shrinkage toward 0; helps pathological wings).
 
     Returns
     -------
-    SVIFit with parameters, final loss, number of points used, and notes.
+    SVIFit
+        Fitted parameters and diagnostics.
     """
-    k = np.asarray(k, dtype=float)
-    w = np.asarray(w, dtype=float)
+    k = _ensure_1d(k, "k")
 
-    # Filter out bad points and tiny/negative variances.
-    mask = np.isfinite(k) & np.isfinite(w) & (w > 0.0)
-    k, w = k[mask], w[mask]
-    n_used = int(mask.sum())
-    if n_used < 6:
-        raise ValueError("Need at least 6 valid points to fit SVI")
-
-    # Align weights to filtered points and sanitize.
-    if weights is None:
-        weights = np.ones_like(w)
+    if w is None:
+        if iv is None or T is None or T <= 0.0:
+            raise ValueError("Provide w, or (iv and positive T).")
+        iv = _ensure_1d(iv, "iv")
+        if iv.size != k.size:
+            raise ValueError("iv and k must have the same length.")
+        w = np.square(iv) * float(T)
     else:
-        weights = np.asarray(weights, dtype=float)
-        weights = weights[mask]
-        weights = np.where(
-            np.isfinite(weights) & (weights > 0.0), weights, 1.0
-        )
+        w = _ensure_1d(w, "w")
+        if w.size != k.size:
+            raise ValueError("w and k must have the same length.")
 
-    # Bounds keep the optimizer well-behaved.
+    # Filter non-finite and non-positive total variance entries
+    k, w = _filter_finite(k, w)
+    w = np.where(w > 0.0, w, np.nan)
+    m = np.isfinite(w)
+    k, w = k[m], w[m]
+    n_used = int(k.size)
+    if n_used < 5:
+        raise ValueError("Need at least 5 valid points to fit SVI.")
+
+    # Weights: custom > price-weighting > ones
+    if weights is not None:
+        wt = _ensure_1d(weights, "weights")
+        if wt.size != n_used:
+            raise ValueError("weights must match k/w length after filtering.")
+        wt = np.where(np.isfinite(wt) & (wt > 0), wt, 1.0)
+    elif use_price_weighting:
+        wt = _price_weights(k, w, F=F, T=T, r=r)
+    else:
+        wt = np.ones_like(k, dtype=float)
+
+    # Bounds and seeds
     if bounds is None:
-        bounds = _default_bounds()
-    lb = np.array(
-        [
-            bounds["a"][0],
-            bounds["b"][0],
-            bounds["rho"][0],
-            bounds["m"][0],
-            bounds["sigma"][0],
-        ],
-        dtype=float,
-    )
-    ub = np.array(
-        [
-            bounds["a"][1],
-            bounds["b"][1],
-            bounds["rho"][1],
-            bounds["m"][1],
-            bounds["sigma"][1],
-        ],
-        dtype=float,
-    )
+        bounds = _initial_bounds_from_data(k, w)
 
-    def obj(x: np.ndarray) -> float:
-        """Weighted mean square error in total variance."""
-        p = _unpack(x)
-        wp = svi_w(k, p["a"], p["b"], p["rho"], p["m"], p["sigma"])
-        res = w - wp
-        return float(np.sum(weights * res * res) / n_used)
+    def objective(theta: np.ndarray) -> float:
+        """
+        Weighted L2 loss in total-variance space with optional L2-regularization.
+        """
+        a, b, rho, m0, sig = theta
+        # Enforce soft validity (bounds handled by optimizer but guard anyway)
+        if b <= 0 or sig <= 0 or not (-0.999 < rho < 0.999):
+            return 1e12
+        w_model = svi_total_variance(k, a, b, rho, m0, sig)
+        # Protect from NaNs; huge penalty if exploded
+        if not np.isfinite(w_model).all():
+            return 1e12
+        res = (w_model - w) * wt
+        sse = float(np.dot(res, res))
+        if reg_lambda > 0.0:
+            sse += reg_lambda * float(np.dot(theta, theta))
+        return sse
 
-    # Try several seeds and keep the best solution.
-    if seeds is None:
-        seeds = _seed_grid(k, w)
+    # Try seed grid (robust) then refine best with L-BFGS-B
+    tried: list[Tuple[float, np.ndarray]] = []
 
-    best = None
-    best_fun = float("inf")
-    best_notes = ""
-
-    for s in seeds:
-        # Clamp seed to bounds to avoid immediate failures.
-        x0 = np.minimum(np.maximum(s, lb), ub)
-        res = minimize(
-            obj,
-            x0,
+    def _local_refine(theta0: np.ndarray) -> Tuple[float, np.ndarray]:
+        out = minimize(
+            objective,
+            x0=theta0,
             method="L-BFGS-B",
-            bounds=list(zip(lb, ub)),
-            options={"maxiter": 200, "ftol": 1e-10},
+            bounds=bounds,
+            options={"maxiter": 500, "ftol": 1e-10},
         )
-        if res.success and res.fun < best_fun:
-            best = res.x
-            best_fun = float(res.fun)
-            best_notes = "ok"
-        elif best is None:
-            # Keep the first attempt even if not "success".
-            best = res.x
-            best_fun = float(res.fun)
-            best_notes = f"{res.message}"
+        val = float(out.fun)
+        params = np.asarray(out.x, dtype=float)
+        return val, params
 
-    p = _unpack(np.asarray(best, dtype=float))
-    return SVIFit(
-        a=p["a"],
-        b=p["b"],
-        rho=p["rho"],
-        m=p["m"],
-        sigma=p["sigma"],
-        loss=best_fun,
+    # Candidate seeds
+    cand_seeds: list[Tuple[float, float, float, float, float]] = []
+    if seed is not None:
+        cand_seeds.append(tuple(float(x) for x in seed))
+    if grid_seeds or not cand_seeds:
+        cand_seeds.extend(
+            _seed_grid_from_data(k, w, bounds, grid_size=grid_size)
+        )
+
+    best_val = np.inf
+    best_params = None
+
+    for s in cand_seeds:
+        val0 = objective(np.asarray(s, dtype=float))
+        # quick reject absurd seeds
+        if not np.isfinite(val0) or val0 > 1e16:
+            continue
+        val, params = _local_refine(np.asarray(s, dtype=float))
+        tried.append((val, params))
+        if val < best_val:
+            best_val = val
+            best_params = params
+
+    if best_params is None:
+        # As a last resort, fall back to mid-bounds
+        mid = np.array([(lo + hi) / 2.0 for (lo, hi) in bounds], dtype=float)
+        best_val, best_params = _local_refine(mid)
+        note = "fallback: mid-bounds seed"
+    else:
+        note = "grid-seeded + L-BFGS-B"
+
+    # RMSE in the weighted space (informational)
+    rmse = float(np.sqrt(best_val / max(n_used, 1)))
+
+    a, b, rho, m0, sig = (float(x) for x in best_params)
+    # Hard clip rho slightly inside (-1, 1) for downstream stability.
+    rho = float(np.clip(rho, -0.999, 0.999))
+    fit = SVIFit(
+        params=(a, b, rho, m0, sig),
+        loss=rmse,
         n_used=n_used,
-        notes=best_notes,
+        method="L-BFGS-B",
+        notes=note,
     )
+    return fit

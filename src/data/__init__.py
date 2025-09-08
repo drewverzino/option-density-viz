@@ -1,35 +1,24 @@
-# src/data/__init__.py
 """
-Option Viz — data package
-
-Convenience imports and documentation so end users can write:
-
-    from data import get_fetcher, OKXFetcher, YFinanceFetcher, OptionChain, OptionQuote
-
-Backends:
-- Equities (yfinance)
-- Crypto (OKX public; optional private endpoints via .env)
-
-Optional env (for OKX private):
-    OKX_API_KEY=...
-    OKX_API_SECRET=...
-    OKX_API_PASSPHRASE=...
-    OKX_SIMULATED=true
+Data-layer exports (types, backends, caching, I/O, rates, throttling).
 """
+
+from __future__ import annotations
 
 from .base import OptionChain, OptionFetcher, OptionQuote
+from .cache import KVCache
+from .historical_loader import (
+    chain_to_dataframe,
+    dataframe_to_chain,
+    load_chain_csv,
+    load_chain_parquet,
+    save_chain_csv,
+    save_chain_parquet,
+)
+from .okx_fetcher import OKXFetcher  # crypto (public endpoints)
+from .rate_limit import AsyncRateLimiter, retry_with_backoff
 from .registry import get_fetcher
-
-# Import backends defensively so partial checkouts/tests don't break imports
-try:
-    from .yf_fetcher import YFinanceFetcher
-except Exception:
-    YFinanceFetcher = None  # type: ignore
-
-try:
-    from .okx_fetcher import OKXFetcher
-except Exception:
-    OKXFetcher = None  # type: ignore
+from .risk_free import RiskFreeConfig, RiskFreeProvider
+from .yf_fetcher import YFinanceFetcher  # equity
 
 __all__ = [
     "OptionQuote",
@@ -38,6 +27,15 @@ __all__ = [
     "get_fetcher",
     "YFinanceFetcher",
     "OKXFetcher",
+    "KVCache",
+    "chain_to_dataframe",
+    "dataframe_to_chain",
+    "save_chain_csv",
+    "save_chain_parquet",
+    "load_chain_csv",
+    "load_chain_parquet",
+    "RiskFreeProvider",
+    "RiskFreeConfig",
+    "AsyncRateLimiter",
+    "retry_with_backoff",
 ]
-
-__version__ = "0.1.0"

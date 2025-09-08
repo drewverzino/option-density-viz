@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Forward price and log-moneyness utilities.
 
@@ -15,21 +13,42 @@ Forward from parity:
 This holds regardless of q once F is defined as S e^{(r - q)T}.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 
+# ----------------------------- basic helpers ---------------------------- #
 def forward_price(S: float, r: float, T: float, q: float = 0.0) -> float:
     """F = S * exp((r - q) * T)"""
     return float(S * np.exp((r - q) * T))
 
 
+def yearfrac(
+    asof: pd.Timestamp | np.datetime64 | "datetime",
+    expiry: pd.Timestamp | np.datetime64 | "datetime",
+) -> float:
+    """ACT/365.25 approximation; clamp to a tiny positive value."""
+    # 365.25 * 24 * 3600 = 31_557_600 seconds in a mean tropical year
+    sec = (pd.Timestamp(expiry) - pd.Timestamp(asof)).total_seconds()
+    return max(float(sec) / 31_557_600.0, 1e-12)
+
+
+def forward_from_carry(spot: float, r: float, T: float) -> float:
+    """No-dividend forward: F = S * exp(r T)."""
+    return float(spot) * float(np.exp(r * T))
+
+
 def log_moneyness(K: np.ndarray | float, F: float) -> np.ndarray | float:
-    """k = ln(K / F)"""
+    """k = ln(K / F). Handles scalar or array K."""
     return np.log(np.asarray(K, dtype=float) / float(F))
+
+
+# ------------------------- forward estimators --------------------------- #
 
 
 def estimate_forward_from_chain(

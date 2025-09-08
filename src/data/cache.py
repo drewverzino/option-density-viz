@@ -1,6 +1,3 @@
-# src/data/cache.py
-from __future__ import annotations
-
 """
 A tiny TTL cache with:
 - fast in-memory dictionary for hot items, and
@@ -14,6 +11,8 @@ Security note:
 - Values are pickled for flexibility. Only cache **trusted** objects created by
   your own process; never unpickle untrusted data.
 """
+
+from __future__ import annotations
 
 import asyncio
 import pickle

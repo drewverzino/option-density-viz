@@ -13,8 +13,6 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 ### data/ (backends, plumbing) 🧱
 
-*(Core data layer is shipped; new data tasks can be added here as needed.)*
-
 - [ ] data/historical_loader.py — add Parquet dependency docs & CLI example  
   Owner: ___ · Tags: 🧱  
   <details><summary>Spec & DoD</summary>
@@ -53,13 +51,7 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 ### vol/ (smiles, surfaces) 📈
 
-- [ ] vol/no_arb.py — arbitrage checks  
-  Owner: ___ · Tags: 📈  
-  <details><summary>Spec & DoD</summary>
-  
-  - Butterfly positivity screens; calendar monotonicity spot checks.  
-  - DoD: violations <1% of strikes; flagged with reasons.
-  </details>
+*(Core SVI stack is shipped.)*
 
 ### density/ (RND) 📐
 
@@ -68,7 +60,7 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   <details><summary>Spec & DoD</summary>
   
   - Central / higher-order differences; adaptive spacing near kinks.  
-  - DoD: pdf ≥0 on ≥98% grid; ∫pdf=1±0.01.
+  - DoD: pdf ≥0 on ≥98% grid; ∫pdf = 1 ± 0.01.
   </details>
 
 - [ ] density/cdf.py — CDF & quantiles  
@@ -108,12 +100,12 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   - DoD: writes normalized JSON/CSV + PNGs; exit codes on failure.
   </details>
 
-- [ ] tests/ — unit & async tests 🧪  
+- [ ] tests/ — network & failure-path 🧪  
   Owner: ___ · Tags: 🧪  
   <details><summary>Spec & DoD</summary>
   
-  - Remaining: yfinance/OKX network smoke tests, failure-path tests, and coverage consolidation.  
-  - DoD: coverage ≥80%; network tests opt-in via env flag.
+  - Add opt-in network smoke tests (OKX/yfinance) and failure-path tests; consolidate coverage ≥80%.  
+  - DoD: `pytest -m "network"` runs only when `OVIZ_RUN_NETWORK=1` is set.
   </details>
 
 ---
@@ -213,7 +205,7 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   Owner: Drew · Tags: 🧮  
   <details><summary>What shipped</summary>
   
-  - Forward formula, log-moneyness, and a robust forward estimator from PCP pairs with optional spread-based weights.
+  - Forward formula, log-moneyness, `estimate_forward_from_chain` and PCP-based estimator as a fallback.
   </details>
 
 ### vol/ 📈
@@ -222,26 +214,22 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
   
-  - Black-76 IV solver (Brent), vega-weighted least squares, seed grid + L-BFGS-B, safe bounds.  
-  - Returns `SVIFit` with params, loss, n_used, and notes; works with preprocess outputs.
+  - `w(k)=a+b(ρ(k−m)+sqrt((k−m)^2+σ^2))`; grid seeds + L-BFGS-B; bounds & mild regularization; price-weighting option.  
+  - Clear return type `SVIFit(params, loss, n_used, method, notes)`.
   </details>
 
 - [x] vol/no_arb.py — arbitrage checks  
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
   
-  - Non-uniform-grid butterfly convexity diagnostic; calendar monotonicity check on total variance.  
-  - Returns violation fractions, indices, and curvature/gap summaries.
+  - Butterfly positivity and calendar monotonicity helpers with diagnostics structure.
   </details>
 
-- [x] vol/surface.py — across maturities (NEW)  
+- [x] vol/surface.py — across maturities (+ price→IV bootstrapping)  
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
   
-  - `fit_surface_from_frames`: per-expiry SVI fits into a surface.  
-  - `smooth_params`: cubic-spline or poly smoothing of (a,b,ρ,m,σ) over T, with ρ clipping and σ floor; preserves `n_used`.  
-  - `iv()` / `w()` evaluators and `calendar_violations` diagnostic.  
-  - `sample_grid` helper for plotting wireframes/contours.
+  - Fit per-expiry SVI using IVs or **solve IV from call prices** (Black-76) if missing; smooth params; evaluate w(k,T)/σ(K,T).
   </details>
 
 ### tests & notebooks 📦
@@ -257,7 +245,7 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   Owner: Drew · Tags: 🧪  
   <details><summary>What shipped</summary>
   
-  - `test_vol_svi.py` (synthetic SVI recovery), `test_vol_noarb.py` (butterfly & calendar sanity).
+  - Synthetic SVI fit test; no-arb (butterfly/calendar) checks.
   </details>
 
 - [x] notebooks/data_test.ipynb — end-to-end data validation  
@@ -267,18 +255,11 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   - PYTHONPATH setup; equity + crypto chain tests; cache/risk-free/limiter demos; CSV round-trip.
   </details>
 
-- [x] notebooks/full_pipeline_test.ipynb — data → preprocess pipeline  
+- [x] notebooks/suite_test.ipynb — data → preprocess → vol → density scaffold  
   Owner: Drew · Tags: 📦  
   <details><summary>What shipped</summary>
   
-  - Fetch chain (equity/crypto), compute mids & PCP diagnostics, estimate forward, log-moneyness, quick visuals, save CSV/PNGs.
-  </details>
-
-- [x] notebooks/SVI_Test.ipynb — SVI calibration + surface (UPDATED)  
-  Owner: Drew · Tags: 📦  
-  <details><summary>What shipped</summary>
-  
-  - Builds (k,w,weights) from preprocessed quotes, fits SVI by expiry, stitches a surface, smooths parameters, runs calendar checks, and overlays fit vs data.
+  - Full pipeline demonstration; BL/CDF sections ready to plug in once density module lands.
   </details>
 
 - [x] README — updated with Results & Theory Deep Dive  
@@ -286,13 +267,6 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   <details><summary>What shipped</summary>
   
   - Pitch-style overview, artifacts/metrics in Results, and a deeper theory section (RN measure, SVI, BL, COS).
-  </details>
-
-- [x] pyproject.toml — packaging & tooling config  
-  Owner: Drew · Tags: 📦  
-  <details><summary>What shipped</summary>
-  
-  - `setuptools` src-layout, extras (`dev`, `notebook`, `parquet`), plus configs for black, isort, flake8, pytest, mypy.
   </details>
 
 ---

@@ -1,67 +1,32 @@
-# src/vol/surface.py
+"""
+SVI surface across maturities (time dimension) with price→IV bootstrapping.
+
+What this provides
+------------------
+- Fit per-expiry SVI using `calibrate_svi_from_quotes` from `svi.py`.
+- Build a light `SVISurface` container to evaluate w(k,T) & iv(K,T).
+- Calendar no-arb spot checks in total variance space.
+- Optional smoothing of parameters across T.
+- When an IV column is missing, solve **implied vols from call prices**
+  via **Black-76** on forwards (robust bisection with sanity clamps).
+
+Alignment with svi.py
+---------------------
+- We import: SVIFit, calibrate_svi_from_quotes, svi_total_variance.
+- We always unpack parameters from `fit.params` (a,b,rho,m,sigma).
+"""
+
 from __future__ import annotations
 
-"""
-SVI surface across maturities (time dimension).
-
-Why this module exists
-----------------------
-You already have a *per-expiry* SVI fit (one smile per maturity). Most
-real analyses need the *full surface* w(k, T) or σ_imp(K, T), plus
-calendar-arbitrage checks. This file:
-
-1) Fits SVI per expiry from your preprocessed DataFrames
-   (using vol.svi.prepare_smile_data + vol.svi.fit_svi).
-2) Stitches those fits into an SVISurface object that can:
-   - evaluate total variance w(k, T) and implied vols σ_imp(K, T)
-   - smooth parameters across T (spline/poly) for nicer surfaces
-   - run calendar no-arbitrage diagnostics
-   - sample a tidy grid for plotting/exports
-
-Inputs (what you must supply)
------------------------------
-For each expiry date `exp` you need:
-- a pandas DataFrame (already "clean") with columns:
-    strike (float), type ('C'/'P'), *either* iv (implied vol)
-    or a price column (default 'mid'). Flags from preprocess are used
-    if `use_flags=True`.
-- scalars per expiry:
-    T_by_expiry[exp]  -> time to maturity in years
-    F_by_expiry[exp]  -> forward price (same units as strike)
-    r_by_expiry[exp]  -> risk-free rate (continuously compounded)
-
-Conventions
------------
-- k = log(K / F) is log-moneyness. Surface internally works in k.
-- w(k, T) is *total variance* (sigma^2 * T).
-- σ_imp = sqrt(w / T). We guard against T≈0 and w<0 numerically.
-
-Minimal example
----------------
->>> surf = fit_surface_from_frames(frames, T_map, F_map, r_map)
->>> surf = smooth_params(surf, method="cubic_spline")
->>> iv = surf.iv([90, 100, 110], expiry=list(surf.fits)[0])
->>> diag = surf.calendar_violations(k_grid=np.linspace(-1, 1, 101))
-
-Implementation notes
---------------------
-- Smoothing helps when per-expiry fits are noisy. We clamp rho to
-  (-rho_clip, +rho_clip) and floor sigma to a small positive value to
-  avoid pathological wings / negative square-roots.
-- SciPy's UnivariateSpline is used if available; otherwise we fall back
-  to a cubic polynomial fit. For tiny maturity sets (<4), splines are
-  automatically skipped.
-"""
-
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
-from datetime import datetime
-
 import math
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 
-# SciPy is optional: if missing, we still provide a working fallback.
+# Optional SciPy for smoothing; code works without it.
 try:
     from scipy.interpolate import UnivariateSpline  # type: ignore
 
@@ -69,34 +34,155 @@ try:
 except Exception:  # pragma: no cover
     _HAVE_SCIPY = False
 
-# Per-expiry SVI fitting utilities.
-from .svi import SVIFit, prepare_smile_data, fit_svi, svi_w
+from .svi import SVIFit, calibrate_svi_from_quotes, svi_total_variance
+
+# --------------------------------------------------------------------- #
+# Black-76 helpers (for price→IV bootstrapping)
+# --------------------------------------------------------------------- #
+
+SQRT2PI = np.sqrt(2.0 * np.pi)
 
 
-# --------------------------------------------------------------------------- #
-# Data container
-# --------------------------------------------------------------------------- #
+def _phi(x: np.ndarray | float) -> np.ndarray | float:
+    """Standard normal pdf φ(x)."""
+    return np.exp(-0.5 * np.square(x)) / SQRT2PI
+
+
+def _Phi(x: np.ndarray | float) -> np.ndarray | float:
+    """Standard normal cdf Φ(x) via erf."""
+    # Use numpy.erf if present; fall back to math.erf scalar-wise.
+    try:
+        from numpy import erf  # type: ignore
+
+        return 0.5 * (1.0 + erf(np.asarray(x) / np.sqrt(2.0)))
+    except Exception:  # pragma: no cover
+        from math import erf as m_erf
+
+        x_arr = np.asarray(x, dtype=float)
+        return 0.5 * (
+            1.0 + np.vectorize(lambda t: m_erf(t / np.sqrt(2.0)))(x_arr)
+        )
+
+
+def _black76_call_price(
+    F: float, K: float, T: float, sigma: float, Df: float
+) -> float:
+    """
+    Black-76 call on forward:
+        C = Df * [ F Φ(d1) - K Φ(d2) ],
+      d1 = [ln(F/K) + 0.5 σ^2 T] / (σ sqrt(T)),
+      d2 = d1 - σ sqrt(T).
+    """
+    if sigma <= 0.0 or T <= 0.0:
+        # Limit: price is just discounted intrinsic
+        return float(Df * max(F - K, 0.0))
+    sqrtT = np.sqrt(T)
+    s = max(sigma, 1e-12)
+    lnFK = np.log(max(F, 1e-300) / max(K, 1e-300))
+    d1 = (lnFK + 0.5 * s * s * T) / (s * sqrtT)
+    d2 = d1 - s * sqrtT
+    return float(Df * (F * _Phi(d1) - K * _Phi(d2)))
+
+
+def _black76_vega(
+    F: float, K: float, T: float, sigma: float, Df: float
+) -> float:
+    """Black-76 vega = Df * F * φ(d1) * sqrt(T)."""
+    if sigma <= 0.0 or T <= 0.0:
+        return 0.0
+    sqrtT = np.sqrt(T)
+    s = max(sigma, 1e-12)
+    lnFK = np.log(max(F, 1e-300) / max(K, 1e-300))
+    d1 = (lnFK + 0.5 * s * s * T) / (s * sqrtT)
+    return float(Df * F * _phi(d1) * sqrtT)
+
+
+def _implied_vol_black76_call(
+    C: float,
+    F: float,
+    K: float,
+    T: float,
+    Df: float,
+    tol: float = 1e-8,
+    max_iter: int = 100,
+) -> float:
+    """
+    Robust scalar implied vol (Black-76) via bracketed bisection
+    with sanity clamps:
+
+      intrinsic_low = Df * max(F - K, 0)
+      upper_bound   = Df * F    (as σ→∞, call → Df * F)
+
+    If C is outside [intrinsic_low, upper_bound], we clamp it into
+    that range (minus a tiny epsilon on the upper side) and proceed.
+    """
+    # Sanity clamps on price
+    intrinsic = Df * max(F - K, 0.0)
+    upper = Df * F
+    if not np.isfinite(C):
+        return 0.0
+    C = float(np.clip(C, intrinsic, max(upper - 1e-12, intrinsic)))
+
+    # Quick exits
+    if C <= intrinsic + 1e-14:
+        return 0.0
+
+    # Bracket: low ~ near-zero vol, high grow until price >= C
+    lo, hi = 1e-8, 1.0
+    price_hi = _black76_call_price(F, K, T, hi, Df)
+    while price_hi < C and hi < 10.0:  # 10 is a generous cap
+        hi *= 2.0
+        price_hi = _black76_call_price(F, K, T, hi, Df)
+
+    # Bisection
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        price_mid = _black76_call_price(F, K, T, mid, Df)
+        if abs(price_mid - C) < tol:
+            return float(mid)
+        if price_mid < C:
+            lo = mid
+        else:
+            hi = mid
+    return float(0.5 * (lo + hi))
+
+
+def _solve_iv_from_calls(
+    df_calls: pd.DataFrame,
+    F: float,
+    T: float,
+    r: float,
+    price_col: str,
+    strike_col: str,
+) -> np.ndarray:
+    """
+    Vectorized implied vol solver for call quotes in a DataFrame.
+    Returns an array of IVs aligned with df_calls rows.
+    """
+    Df = float(np.exp(-r * T))
+    K = df_calls[strike_col].to_numpy(float)
+    C = df_calls[price_col].to_numpy(float)
+    out = np.empty_like(C, dtype=float)
+    for i in range(C.size):
+        out[i] = _implied_vol_black76_call(
+            C=float(C[i]), F=float(F), K=float(K[i]), T=float(T), Df=Df
+        )
+    return out
+
+
+# --------------------------------------------------------------------- #
+# Data container for a stitched surface
+# --------------------------------------------------------------------- #
 
 
 @dataclass
 class SVISurface:
     """
-    A light container holding per-expiry SVI fits and meta.
+    Per-expiry SVI fits + metadata.
 
-    Attributes
-    ----------
-    fits : dict[datetime, SVIFit]
-        SVI parameters (a, b, rho, m, sigma) per expiry.
-    T, F, r : dict[datetime, float]
-        Time to maturity, forward, and risk-free per expiry.
-    asof_utc : datetime | None
-        Optional "as of" timestamp for bookkeeping.
-
-    Methods
-    -------
-    w(k, expiry)  -> total variance at log-moneyness k
-    iv(K, expiry) -> implied volatility at strike K
-    calendar_violations(k_grid) -> no-arb diagnostics across maturities
+    fits : dict[expiry, SVIFit]       → params in fit.params (a,b,rho,m,sigma)
+    T, F, r : dict[expiry, float]     → year-fraction, forward, rate
+    asof_utc : optional timestamp     → provenance for display/logging
     """
 
     fits: Dict[datetime, SVIFit]
@@ -105,87 +191,36 @@ class SVISurface:
     r: Dict[datetime, float]
     asof_utc: Optional[datetime] = None
 
-    # ---- convenience ----
-
     def expiries(self) -> List[datetime]:
-        """Return expiries in ascending chronological order."""
         return sorted(self.fits.keys())
 
-    def as_tuple(
+    def params_tuple(
         self, expiry: datetime
     ) -> Tuple[float, float, float, float, float]:
-        """Return (a, b, rho, m, sigma) for a given expiry."""
-        fit = self.fits[expiry]
-        return fit.a, fit.b, fit.rho, fit.m, fit.sigma
+        a, b, rho, m, sigma = self.fits[expiry].params
+        return float(a), float(b), float(rho), float(m), float(sigma)
 
-    # ---- evaluations ----
-
-    def w(self, k: np.ndarray, expiry: datetime) -> np.ndarray:
-        """
-        Evaluate total variance w(k, T) at a given expiry.
-
-        Parameters
-        ----------
-        k : array_like
-            Log-moneyness values.
-        expiry : datetime
-            Maturity to evaluate.
-
-        Returns
-        -------
-        np.ndarray
-            Total variance values, same shape as `k`.
-        """
-        a, b, rho, m, sigma = self.as_tuple(expiry)
-        return svi_w(np.asarray(k, dtype=float), a, b, rho, m, sigma)
+    def w(self, k: np.ndarray | float, expiry: datetime) -> np.ndarray:
+        """Total variance w(k,T) at given expiry."""
+        a, b, rho, m, sigma = self.params_tuple(expiry)
+        kk = np.asarray(k, dtype=float)
+        return svi_total_variance(kk, a, b, rho, m, sigma)
 
     def iv(self, K: np.ndarray | float, expiry: datetime) -> np.ndarray:
-        """
-        Evaluate implied volatility σ_imp(K, T) at a given expiry.
-
-        Notes
-        -----
-        Converts K to k = log(K/F), then σ = sqrt(w / T). We floor T
-        to avoid division by ~0, and clip w at 0 to stay real.
-        """
+        """Implied vol σ_imp(K,T) from total variance."""
         F = float(self.F[expiry])
         T = float(self.T[expiry])
         K_arr = np.asarray(K, dtype=float)
         k = np.log(K_arr / F)
         wT = self.w(k, expiry)
-        iv = np.sqrt(np.maximum(wT, 0.0) / max(T, 1e-12))
-        return iv
-
-    # ---- diagnostics ----
+        return np.sqrt(np.maximum(wT, 0.0) / max(T, 1e-12))
 
     def calendar_violations(
-        self,
-        k_grid: np.ndarray,
-        tol: float = 0.0,
+        self, k_grid: np.ndarray, tol: float = 0.0
     ) -> Dict[str, object]:
         """
-        Calendar no-arbitrage check on total variance.
-
-        Rule checked
-        ------------
-        For T2 > T1 we should have w(k, T2) >= w(k, T1) for all k.
-        We count violations on a supplied k_grid.
-
-        Parameters
-        ----------
-        k_grid : array_like
-            Log-moneyness points to check on.
-        tol : float
-            Soft tolerance. Using a small negative tol lets you ignore
-            tiny numerical noise (e.g. tol = -1e-8).
-
-        Returns
-        -------
-        dict with keys:
-            count     : number of violated (pair, k) checks
-            n_checks  : total checks (pairs * len(k_grid))
-            fraction  : count / n_checks
-            by_pair   : list of (T1, T2, fraction_for_that_pair)
+        Calendar check: for T2 > T1 require w(k,T2) >= w(k,T1) ∀k.
+        Returns counts and per-adjacent-maturity fractions on k_grid.
         """
         exps = self.expiries()
         if len(exps) < 2:
@@ -199,29 +234,116 @@ class SVISurface:
         for e1, e2 in zip(exps[:-1], exps[1:]):
             w1 = self.w(k, e1)
             w2 = self.w(k, e2)
-            # A violation is when later maturity has *less* total variance.
-            violate = (w2 + tol) < w1
+            vio = (w2 + tol) < w1
             n = int(k.size)
-            c = int(np.count_nonzero(violate))
+            c = int(np.count_nonzero(vio))
             total += n
             bad += c
-            t1 = float(self.T[e1])
-            t2 = float(self.T[e2])
-            frac = c / n if n else 0.0
-            by_pair.append((t1, t2, frac))
+            t1, t2 = float(self.T[e1]), float(self.T[e2])
+            by_pair.append((t1, t2, (c / n) if n else 0.0))
 
-        frac_all = bad / total if total else 0.0
         return {
             "count": bad,
             "n_checks": total,
-            "fraction": frac_all,
+            "fraction": (bad / total) if total else 0.0,
             "by_pair": by_pair,
         }
 
 
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------- #
+# Prepare smile data (k, w, weights) from a per-expiry frame
+# --------------------------------------------------------------------- #
+
+
+def _prepare_smile_data_from_frame(
+    df: pd.DataFrame,
+    *,
+    T: float,
+    F: float,
+    r: float,
+    price_col: str = "mid",
+    type_col: str = "type",
+    strike_col: str = "strike",
+    iv_col: str = "iv",
+    use_flags: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """
+    Build (k, w, weights) from a *clean* per-expiry DataFrame.
+
+    Strategy
+    --------
+    - Use **calls only** to avoid put IV convention ambiguity.
+    - If `iv_col` exists and has finite values → use it.
+    - Else, **solve implied vol** from call mid prices with Black-76.
+    - Optionally filter out crossed/wide quotes if flags exist.
+
+    Returns
+    -------
+    (k, w, weights)
+      k       : ln(K / F)
+      w       : total variance = iv^2 * T
+      weights : optional array (e.g., 1/rel_spread); or None
+    """
+    d = df.copy()
+
+    # Optional hygiene flags from preprocess.midprice
+    if use_flags:
+        if "crossed" in d.columns:
+            d = d[~d["crossed"].astype(bool)]
+        if "wide" in d.columns:
+            d = d[~d["wide"].astype(bool)]
+
+    # Restrict to calls (C)
+    t = d[type_col].astype(str).str.upper().str.strip()
+    d = d[t.str.startswith("C")]
+    d = d.dropna(subset=[strike_col, price_col])
+    if d.empty:
+        return np.array([]), np.array([]), None
+
+    # If IV column is present and useful, use it; otherwise solve IVs.
+    iv = None
+    if iv_col in d.columns:
+        iv = d[iv_col].to_numpy(dtype=float)
+        iv = np.where(np.isfinite(iv) & (iv > 0.0), iv, np.nan)
+        if np.count_nonzero(np.isfinite(iv)) < 5:
+            iv = None  # not enough reliable IVs
+
+    if iv is None:
+        # Solve IVs from call prices (Black-76 on forwards)
+        iv = _solve_iv_from_calls(
+            df_calls=d,
+            F=float(F),
+            T=float(T),
+            r=float(r),
+            price_col=price_col,
+            strike_col=strike_col,
+        )
+
+    # Build w and k
+    K = d[strike_col].to_numpy(dtype=float)
+    k = np.log(K / float(F))
+    w = (np.abs(iv) ** 2) * float(T)
+
+    # Optional weights: inverse relative spread if present
+    weights = None
+    if "rel_spread" in d.columns:
+        wts = 1.0 / np.clip(
+            d["rel_spread"].to_numpy(dtype=float), 1e-6, np.inf
+        )
+        if np.any(np.isfinite(wts)):
+            weights = wts
+
+    # Cull any remaining non-finite entries
+    mask = np.isfinite(k) & np.isfinite(w)
+    if weights is not None:
+        mask = mask & np.isfinite(weights)
+        weights = weights[mask]
+    return k[mask], w[mask], weights
+
+
+# --------------------------------------------------------------------- #
 # Fit per-expiry SVI and build a surface
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------- #
 
 
 def fit_surface_from_frames(
@@ -239,28 +361,15 @@ def fit_surface_from_frames(
     """
     Fit SVI per expiry from *clean* frames and return an SVISurface.
 
-    What this does
-    --------------
     For each expiry present in all mappings:
-    - Build (k, w, weights) via prepare_smile_data.
-    - Fit SVI parameters with fit_svi (vega-weighted LS by default).
-    - Skip expiries with too few valid points (<7).
-
-    Parameters (columns)
-    --------------------
-    price_col : column name for prices when no IV is present (default 'mid')
-    type_col  : column with 'C'/'P'
-    strike_col: strikes in same units as the forward
-    iv_col    : optional; if present we can skip IV solve from prices
-
-    Returns
-    -------
-    SVISurface
-        Surface with per-expiry fits and the provided meta (T, F, r).
+      1) Prepare (k, w, weights) using IV column or price→IV bootstrapping.
+      2) Fit params with `calibrate_svi_from_quotes` (vega-weighted loss
+         if F,T are provided and no custom weights).
+      3) Skip expiries with too few valid points (< 7).
     """
     fits: Dict[datetime, SVIFit] = {}
 
-    # Only keep expiries that exist in all meta dictionaries.
+    # Only expiries that exist in all inputs
     common = (
         set(frames_by_expiry)
         & set(T_by_expiry)
@@ -276,22 +385,31 @@ def fit_surface_from_frames(
         F = float(F_by_expiry[exp])
         r = float(r_by_expiry[exp])
 
-        k, w, wts = prepare_smile_data(
+        k, w, wts = _prepare_smile_data_from_frame(
             df,
             T=T,
-            r=r,
             F=F,
+            r=r,
             price_col=price_col,
             type_col=type_col,
             strike_col=strike_col,
             iv_col=iv_col,
             use_flags=use_flags,
         )
-        # Heuristic: need a handful of points across wings to be stable.
-        if len(k) < 7:
-            continue
+        if k.size < 7:
+            continue  # not enough points for a stable smile
 
-        fits[exp] = fit_svi(k, w, weights=wts)
+        fit = calibrate_svi_from_quotes(
+            k,
+            w=w,
+            F=F,
+            T=T,
+            r=r,
+            weights=wts,  # if None, fitter will price-weight
+            use_price_weighting=(wts is None),
+            grid_size=5,
+        )
+        fits[exp] = fit
 
     if not fits:
         raise ValueError("No expiries produced a valid SVI fit.")
@@ -302,9 +420,9 @@ def fit_surface_from_frames(
     return SVISurface(fits=fits, T=T_map, F=F_map, r=r_map)
 
 
-# --------------------------------------------------------------------------- #
-# Smoothing utilities
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------- #
+# Smoothing (across maturities)
+# --------------------------------------------------------------------- #
 
 
 def _param_series(
@@ -312,58 +430,44 @@ def _param_series(
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """
     Extract arrays for T and each SVI parameter series.
-
-    Returns
-    -------
-    T : np.ndarray shape (n_expiries,)
-    series : dict[str, np.ndarray]
-        Keys: 'a', 'b', 'rho', 'm', 'sigma'
+    Returns T and dict with keys: 'a','b','rho','m','sigma'.
     """
     exps = surface.expiries()
     T = np.array([surface.T[e] for e in exps], dtype=float)
-    a = np.array([surface.fits[e].a for e in exps], dtype=float)
-    b = np.array([surface.fits[e].b for e in exps], dtype=float)
-    rho = np.array([surface.fits[e].rho for e in exps], dtype=float)
-    m = np.array([surface.fits[e].m for e in exps], dtype=float)
-    sig = np.array([surface.fits[e].sigma for e in exps], dtype=float)
+    a = np.array([surface.fits[e].params[0] for e in exps], dtype=float)
+    b = np.array([surface.fits[e].params[1] for e in exps], dtype=float)
+    rho = np.array([surface.fits[e].params[2] for e in exps], dtype=float)
+    m = np.array([surface.fits[e].params[3] for e in exps], dtype=float)
+    sig = np.array([surface.fits[e].params[4] for e in exps], dtype=float)
     return T, {"a": a, "b": b, "rho": rho, "m": m, "sigma": sig}
 
 
 def _smooth_1d(
-    T: np.ndarray,
-    y: np.ndarray,
-    method: str = "cubic_spline",
+    T: np.ndarray, y: np.ndarray, method: str = "cubic_spline"
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Smooth 1-D series y(T).
+    Smooth y(T) across maturities.
 
     method:
-      - 'cubic_spline' (default): C^2 spline with s=0 (interpolant).
-        Requires SciPy and at least 4 maturities.
-      - 'poly3': cubic polynomial least-squares fit (no SciPy needed).
-      - 'linear': pass-through / identity interpolation.
-
-    Returns (T_sorted, y_smooth(T_sorted)).
+      - 'cubic_spline' (default): requires SciPy & >=4 points.
+      - 'poly3': cubic polynomial fit (works without SciPy).
+      - 'linear': identity interpolation on given T-grid.
     """
     idx = np.argsort(T)
-    Ts = T[idx]
-    ys = y[idx]
+    Ts, ys = T[idx], y[idx]
 
     if method == "poly3" or not _HAVE_SCIPY:
         coeff = np.polyfit(Ts, ys, deg=3)
-        yhat = np.polyval(coeff, Ts)
-        return Ts, yhat
+        return Ts, np.polyval(coeff, Ts)
 
     if method == "linear":
-        # identity on the known grid
         return Ts, np.interp(Ts, Ts, ys)
 
-    # cubic spline if available and we have enough points
     if _HAVE_SCIPY and len(Ts) >= 4:
         spl = UnivariateSpline(Ts, ys, s=0.0, k=3)
         return Ts, spl(Ts)
 
-    # fallback if not enough points
+    # Fallback: simple linear interpolation
     return Ts, np.interp(Ts, Ts, ys)
 
 
@@ -375,17 +479,8 @@ def smooth_params(
     sigma_floor: float = 1e-6,
 ) -> SVISurface:
     """
-    Smooth SVI params (a,b,rho,m,sigma) across maturities.
-
-    Why clamp/floor?
-    ----------------
-    - rho is a correlation-like skew in (-1, +1). Values near ±1 can
-      make wings explode; we clip to a safe interior.
-    - sigma is like a "horizontal" width. Non-positive sigma would
-      break the square-root in SVI; we floor to a tiny positive value.
-
-    Returns a NEW SVISurface with smoothed parameters. F, r, T are
-    copied over unchanged.
+    Smooth SVI params (a,b,rho,m,sigma) across maturities and
+    return a **new** surface with smoothed parameters. T/F/r copied.
     """
     T, series = _param_series(surface)
     exps = surface.expiries()
@@ -399,19 +494,21 @@ def smooth_params(
     rho_hat = np.clip(rho_hat, -rho_clip, rho_clip)
     s_hat = np.maximum(s_hat, sigma_floor)
 
-    # Rebuild SVIFit objects in the original expiry order.
     fits: Dict[datetime, SVIFit] = {}
     for i, exp in enumerate(exps):
         old = surface.fits[exp]
+        params = (
+            float(a_hat[i]),
+            float(b_hat[i]),
+            float(rho_hat[i]),
+            float(m_hat[i]),
+            float(s_hat[i]),
+        )
         fits[exp] = SVIFit(
-            a=float(a_hat[i]),
-            b=float(b_hat[i]),
-            rho=float(rho_hat[i]),
-            m=float(m_hat[i]),
-            sigma=float(s_hat[i]),
-            # carry diagnostics/metadata through
+            params=params,
             loss=getattr(old, "loss", math.nan),
             n_used=getattr(old, "n_used", 0),
+            method=getattr(old, "method", "L-BFGS-B"),
             notes="smoothed",
         )
 
@@ -424,9 +521,9 @@ def smooth_params(
     )
 
 
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------- #
 # Sampling helper for plotting / exports
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------- #
 
 
 def sample_grid(
@@ -438,19 +535,9 @@ def sample_grid(
     """
     Build a tidy table of (expiry, T, K, k, w, iv) from the surface.
 
-    Why this is useful
-    ------------------
-    Many plotting libs (wireframes/contours) are easier to drive from a
-    rectangular-ish DataFrame. This helper does the IV/w lookups and
-    returns a table you can feed directly to seaborn/plotly/mpl.
-
-    Returns
-    -------
-    DataFrame columns:
-      expiry (datetime64[ns]), T, K, k, w, iv
+    Columns: expiry (datetime64), T, K, k, w, iv
     """
     rows: List[Dict[str, object]] = []
-
     for exp in expiry_list:
         F = float(surface.F[exp])
         T = float(surface.T[exp])
@@ -458,7 +545,6 @@ def sample_grid(
         k = np.log(K / F)
         wT = surface.w(k, exp)
         iv = np.sqrt(np.maximum(wT, 0.0) / max(T, 1e-12))
-
         for Ki, ki, wTi, ivi in zip(K, k, wT, iv):
             rows.append(
                 {
@@ -470,5 +556,4 @@ def sample_grid(
                     "iv": float(ivi),
                 }
             )
-
     return pd.DataFrame(rows)

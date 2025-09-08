@@ -1,6 +1,3 @@
-# src/data/rate_limit.py
-from __future__ import annotations
-
 """
 Polite rate-limiting and retry utilities for async code.
 
@@ -19,9 +16,11 @@ Usage examples:
     resp = await retry_with_backoff(lambda: client.get(url), retries=4)
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
 
 class AsyncRateLimiter:

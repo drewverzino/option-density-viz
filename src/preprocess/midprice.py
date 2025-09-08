@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Midprice and quote-quality utilities.
 
@@ -16,8 +14,9 @@ Design choices:
 - We leave original columns untouched and return a new DataFrame.
 """
 
+from __future__ import annotations
+
 import math
-from typing import Literal, Optional
 
 import pandas as pd
 
