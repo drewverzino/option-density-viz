@@ -372,13 +372,13 @@ async def _choose_equity_fetchers():
 def _estimate_forward_compat(df: pd.DataFrame, r: float, T: float):
     func = M["estimate_forward"]
     func_name = getattr(func, '__name__', str(func))
-    
+
     # Check if this is estimate_forward_from_chain (takes DataFrame)
     if func_name == 'estimate_forward_from_chain':
         sig = inspect.signature(func)
         params = set(sig.parameters.keys())
         kwargs = {"r": r, "T": T}
-        
+
         # Add optional parameters if supported
         if "price_col" in params:
             kwargs["price_col"] = "mid"
@@ -388,34 +388,38 @@ def _estimate_forward_compat(df: pd.DataFrame, r: float, T: float):
             kwargs["strike_col"] = "strike"
         if "top_n" in params:
             kwargs["top_n"] = 7
-            
+
         return float(func(df, **kwargs))
-    
+
     # Check if this is estimate_forward_from_pcp (takes arrays)
     elif func_name == 'estimate_forward_from_pcp':
         # Need to extract call/put/strike arrays from DataFrame
         try:
-            from .pcp import pivot_calls_puts_by_strike
+            from ..preprocess.pcp import pivot_calls_puts_by_strike
         except ImportError:
             try:
                 from preprocess.pcp import pivot_calls_puts_by_strike
             except ImportError:
-                raise ValueError("Cannot import pivot_calls_puts_by_strike for PCP forward estimation")
-        
+                raise ValueError(
+                    "Cannot import pivot_calls_puts_by_strike for PCP forward estimation"
+                )
+
         # Get call/put pairs
         wide = pivot_calls_puts_by_strike(
             df, price_col="mid", type_col="type", strike_col="strike"
         )
-        
+
         if wide.empty or "C" not in wide.columns or "P" not in wide.columns:
-            raise ValueError("No call/put pairs found for PCP forward estimation")
-        
+            raise ValueError(
+                "No call/put pairs found for PCP forward estimation"
+            )
+
         calls = wide["C"].to_numpy(dtype=float)
-        puts = wide["P"].to_numpy(dtype=float) 
+        puts = wide["P"].to_numpy(dtype=float)
         strikes = wide.index.to_numpy(dtype=float)
-        
+
         return float(func(calls, puts, strikes, r=r, T=T))
-    
+
     else:
         # Try generic approach
         try:
@@ -486,7 +490,7 @@ async def _run_pipeline(args) -> None:
     asof = chain.asof_utc
     logger.info(f"Fetched chain as of {asof} with {len(chain.quotes)} quotes")
     logger.info(
-        f"Backend: {chosen_backend}{' (fallback)' if chosen_backend=='yfinance' else ' (preferred)'}"
+        f"Backend: {chosen_backend}{' (fallback)' if chosen_backend == 'yfinance' else ' (preferred)'}"
     )
 
     df = M["chain_to_dataframe"](chain)
@@ -545,8 +549,16 @@ async def _run_pipeline(args) -> None:
         ] = np.nan
 
     df = M["add_midprice_columns"](df, wide_rel_threshold=0.15)
-    n_crossed = int(df.get("crossed", pd.Series([], dtype=bool)).sum()) if "crossed" in df.columns else 0  # type: ignore
-    n_wide = int(df.get("wide", pd.Series([], dtype=bool)).sum()) if "wide" in df.columns else 0  # type: ignore
+    n_crossed = (
+        int(df.get("crossed", pd.Series([], dtype=bool)).sum())
+        if "crossed" in df.columns
+        else 0
+    )  # type: ignore
+    n_wide = (
+        int(df.get("wide", pd.Series([], dtype=bool)).sum())
+        if "wide" in df.columns
+        else 0
+    )  # type: ignore
     logger.info(f"Quote quality: {n_crossed} crossed, {n_wide} wide")
 
     # 3) Risk-free and T

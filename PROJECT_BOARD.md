@@ -2,7 +2,22 @@
 
 ## Legend
 
-Status: 🟦 To Do · 🟨 In Progress · 🟩 Done  
+Status: 🟦 To Do
+
+- Vega-weighted SVI fit
+- Calendar arbitrage heatmap
+- Midprice audit dashboard
+- Golden BL density fixtures
+- CI smoke tests · 🟨 In Progress
+
+- Polygon fetcher hardening (SDK+REST)
+- Async-safe Polygon notebooks · 🟩 Done
+
+- CLI fallback Polygon→yfinance
+- CLI guard for empty frames
+- Streamlit safe slider
+- README updated with troubleshooting
+- Comprehensive synthetic notebook  
 Tags: 🧱 Infra · 🔑 Auth · 📈 Modeling · 📐 Density · 🧮 Preprocess · 📊 Viz · 🧪 Tests · 📦 CLI/Docs · 🪵 Logging
 
 Tip: Assign an owner by replacing `Owner: ___`. Move items between the three status sections below.
@@ -10,6 +25,12 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 ---
 
 ## 🟦 To Do
+
+- Vega-weighted SVI fit
+- Calendar arbitrage heatmap
+- Midprice audit dashboard
+- Golden BL density fixtures
+- CI smoke tests
 
 ### vol/ (smiles, surfaces) 📈
 
@@ -65,6 +86,9 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 ## 🟨 In Progress
 
+- Polygon fetcher hardening (SDK+REST)
+- Async-safe Polygon notebooks
+
 - [ ] vol/surface.py — basic multi-expiry helpers (wiring)  
   Owner: Drew · Tags: 📈  
   <details><summary>Now</summary>
@@ -76,6 +100,12 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 ---
 
 ## 🟩 Done
+
+- CLI fallback Polygon→yfinance
+- CLI guard for empty frames
+- Streamlit safe slider
+- README updated with troubleshooting
+- Comprehensive synthetic notebook
 
 ### data/ 🧱
 
@@ -184,7 +214,13 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
   <details><summary>What shipped</summary>
 
   - Fit SVI per expiry; simple API to query IV via nearest/linear blend.  
-  - Next: smooth params across T (see To Do).
+  - Next: smooth params across T (see To Do
+
+- Vega-weighted SVI fit
+- Calendar arbitrage heatmap
+- Midprice audit dashboard
+- Golden BL density fixtures
+- CI smoke tests).
   </details>
 
 ### density/ 📐

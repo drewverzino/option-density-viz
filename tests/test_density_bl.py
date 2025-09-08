@@ -2,10 +2,7 @@ import numpy as np
 import pytest
 from scipy.special import erf
 
-from density.bl import (
-    bl_pdf_from_calls,
-    bl_pdf_from_calls_nonuniform,
-)
+from density.bl import bl_pdf_from_calls, bl_pdf_from_calls_nonuniform
 from density.cdf import moments_from_pdf
 
 

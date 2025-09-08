@@ -322,3 +322,10 @@ See [LICENSE](LICENSE) for details.
 - **yfinance** for convenient equity options data  
 - Jim Gatheral for the **SVI volatility smile framework**  
 - Breeden & Litzenberger (1978) for the foundational density extraction m
+
+
+## Troubleshooting
+- **Empty chains**: If Polygon returns 0 quotes, the CLI falls back to yfinance automatically.
+- **Missing strike column**: The CLI now exits gracefully, writing a minimal results.json instead of crashing.
+- **Streamlit slider error (min==max)**: Fixed — slider disabled when only one expiry is available.
+- **asyncio.run() in Jupyter**: Use the async-safe Polygon notebook (`oviz_polygon_live_tests_async.ipynb`).
