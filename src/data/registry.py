@@ -9,11 +9,14 @@ Why a registry:
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from .base import OptionFetcher
 from .okx_fetcher import OKXFetcher
 from .yf_fetcher import YFinanceFetcher
+
+logger = logging.getLogger(__name__)
 
 
 def get_fetcher(
@@ -25,8 +28,16 @@ def get_fetcher(
     kwargs are forwarded to the underlying fetcher constructors so callers can
     override defaults (timeouts, currency labels, etc.).
     """
+    logger.debug(f"Creating {asset_class} fetcher with kwargs: {kwargs}")
+
     if asset_class == "equity":
-        return YFinanceFetcher(**kwargs)
-    if asset_class == "crypto":
-        return OKXFetcher(**kwargs)
-    raise ValueError(f"Unsupported asset_class: {asset_class}")
+        fetcher = YFinanceFetcher(**kwargs)
+        logger.info(f"Created YFinanceFetcher")
+        return fetcher
+    elif asset_class == "crypto":
+        fetcher = OKXFetcher(**kwargs)
+        logger.info(f"Created OKXFetcher")
+        return fetcher
+    else:
+        logger.error(f"Unsupported asset_class: {asset_class}")
+        raise ValueError(f"Unsupported asset_class: {asset_class}")

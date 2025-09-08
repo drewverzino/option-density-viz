@@ -19,8 +19,11 @@ Usage examples:
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from typing import Any, Awaitable, Callable
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncRateLimiter:
@@ -33,11 +36,25 @@ class AsyncRateLimiter:
 
     def __init__(self, max_concurrent: int = 5):
         self._sem = asyncio.Semaphore(max_concurrent)
+        self.max_concurrent = max_concurrent
+        logger.debug(
+            f"AsyncRateLimiter initialized with max_concurrent={max_concurrent}"
+        )
 
     async def run(self, coro_func: Callable[[], Awaitable[Any]]) -> Any:
         """Run 'coro_func' under the concurrency gate."""
+        logger.debug(
+            f"Acquiring semaphore ({self._sem._value}/{self.max_concurrent} available)"
+        )
         async with self._sem:
-            return await coro_func()
+            logger.debug("Semaphore acquired, executing function")
+            try:
+                result = await coro_func()
+                logger.debug("Function completed successfully")
+                return result
+            except Exception as e:
+                logger.debug(f"Function failed: {e}")
+                raise
 
 
 async def retry_with_backoff(
@@ -65,16 +82,41 @@ async def retry_with_backoff(
     Raises:
       The last exception if we exhaust retries.
     """
+    logger.debug(
+        f"Starting retry_with_backoff: max_retries={retries}, "
+        f"base_delay={base_delay}, max_delay={max_delay}"
+    )
+
     attempt = 0
     delay = base_delay
+    last_exception = None
+
     while True:
         try:
-            return await func()
-        except retry_on:
+            if attempt == 0:
+                logger.debug("Initial attempt")
+            else:
+                logger.debug(f"Retry attempt {attempt}/{retries}")
+
+            result = await func()
+            if attempt > 0:
+                logger.info(f"Function succeeded on attempt {attempt + 1}")
+            return result
+
+        except retry_on as e:
+            last_exception = e
             attempt += 1
+
             if attempt > retries:
-                raise
+                logger.error(f"All {retries + 1} attempts failed, giving up")
+                raise e
+
             # Jitter factor in [1 - jitter, 1 + jitter]
             jitter_factor = 1.0 + (random.random() * 2 - 1) * jitter
-            await asyncio.sleep(min(max_delay, delay * jitter_factor))
+            sleep_time = min(max_delay, delay * jitter_factor)
+
+            logger.warning(
+                f"Attempt {attempt} failed: {e}. Retrying in {sleep_time:.2f}s..."
+            )
+            await asyncio.sleep(sleep_time)
             delay = min(max_delay, delay * 2)

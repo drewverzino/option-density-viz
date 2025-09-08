@@ -16,9 +16,12 @@ Design choices:
 
 from __future__ import annotations
 
+import logging
 import math
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def _clean_side(x: float | None) -> float | None:
@@ -70,8 +73,19 @@ def add_midprice_columns(
             f"{out_prefix}wide"
             f"{out_prefix}side_used"  # {"both","bid_only","ask_only","none"}
     """
+    logger.info(
+        f"Computing midprices for {len(df)} quotes (wide_threshold={wide_rel_threshold:.1%})"
+    )
+
+    if bid_col not in df.columns or ask_col not in df.columns:
+        raise ValueError(
+            f"DataFrame missing required columns: {bid_col}, {ask_col}"
+        )
+
     d = df.copy()
 
+    # Clean and validate bid/ask data
+    logger.debug(f"Cleaning bid/ask columns: {bid_col}, {ask_col}")
     bid = d[bid_col].map(_clean_side)
     ask = d[ask_col].map(_clean_side)
 
@@ -81,10 +95,32 @@ def add_midprice_columns(
     both = has_bid & has_ask
     bid_only = has_bid & (~has_ask)
     ask_only = has_ask & (~has_bid)
+    neither = ~(has_bid | has_ask)
+
+    # Log data quality summary
+    n_both = both.sum()
+    n_bid_only = bid_only.sum()
+    n_ask_only = ask_only.sum()
+    n_neither = neither.sum()
+
+    logger.info(
+        f"Quote availability: {n_both} both sides, {n_bid_only} bid-only, "
+        f"{n_ask_only} ask-only, {n_neither} neither"
+    )
 
     # Spread and crossed flag (only meaningful if both sides exist)
     spread = (ask - bid).where(both)
     crossed = (bid > ask + eps).where(both, False)
+
+    # Count crossed markets
+    n_crossed = crossed.sum()
+    if n_crossed > 0:
+        logger.warning(
+            f"Found {n_crossed} crossed markets (bid > ask + {eps})"
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            crossed_strikes = d[crossed].get('strike', range(len(d[crossed])))
+            logger.debug(f"Crossed strikes: {list(crossed_strikes)[:5]}...")
 
     # Mid computation
     mid = ((bid + ask) / 2).where(both)
@@ -92,18 +128,32 @@ def add_midprice_columns(
     mid = mid.where(~mid.isna(), bid)  # fallback to bid
     mid = mid.where(~mid.isna(), ask)  # fallback to ask
 
+    # Count successful mid calculations
+    n_mids = mid.notna().sum()
+    logger.debug(f"Computed {n_mids}/{len(df)} valid midprices")
+
     # Relative spread (use mid only when both sides exist and mid>0)
     rel_spread = (spread / mid).where(both & mid.gt(0))
 
     # Wide flag
     wide = (rel_spread > wide_rel_threshold).fillna(False)
+    n_wide = wide.sum()
+
+    if n_wide > 0:
+        logger.info(f"Found {n_wide} wide spreads (>{wide_rel_threshold:.1%})")
+        if logger.isEnabledFor(logging.DEBUG):
+            avg_wide_spread = rel_spread[wide].mean()
+            max_wide_spread = rel_spread[wide].max()
+            logger.debug(
+                f"Wide spread stats: avg={avg_wide_spread:.1%}, max={max_wide_spread:.1%}"
+            )
 
     # Side used tag
     side_used = pd.Series(index=d.index, dtype=object)
     side_used.loc[both] = "both"
     side_used.loc[bid_only] = "bid_only"
     side_used.loc[ask_only] = "ask_only"
-    side_used.loc[~(both | bid_only | ask_only)] = "none"
+    side_used.loc[neither] = "none"
 
     # Attach results
     d[f"{out_prefix}mid"] = mid
@@ -112,5 +162,10 @@ def add_midprice_columns(
     d[f"{out_prefix}crossed"] = crossed.fillna(False)
     d[f"{out_prefix}wide"] = wide
     d[f"{out_prefix}side_used"] = side_used
+
+    logger.info(
+        f"Added midprice columns with prefix '{out_prefix}': "
+        f"{n_mids} mids, {n_crossed} crossed, {n_wide} wide"
+    )
 
     return d

@@ -12,6 +12,7 @@ Notes:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List
@@ -19,6 +20,8 @@ from typing import Iterable, List
 import pandas as pd
 
 from .base import OptionChain, OptionQuote
+
+logger = logging.getLogger(__name__)
 
 # ----------------- DataFrame conversion -----------------
 
@@ -31,6 +34,10 @@ def chain_to_dataframe(chain: OptionChain) -> pd.DataFrame:
       - One row per OptionQuote
       - 'asof_utc' and 'spot' broadcast to all rows for convenience
     """
+    logger.debug(
+        f"Converting OptionChain to DataFrame: {len(chain.quotes)} quotes"
+    )
+
     rows = []
     for q in chain.quotes:
         rows.append(
@@ -59,6 +66,10 @@ def chain_to_dataframe(chain: OptionChain) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df["asof_utc"] = chain.asof_utc
     df["spot"] = chain.spot
+
+    logger.debug(
+        f"DataFrame created: {df.shape[0]} rows x {df.shape[1]} columns"
+    )
     return df
 
 
@@ -70,11 +81,14 @@ def dataframe_to_chain(df: pd.DataFrame) -> OptionChain:
     - Accepts 'expiry' either as timestamps or strings (we coerce to UTC).
     - Missing 'asof_utc' falls back to "now" so downstream code still works.
     """
+    logger.debug(f"Converting DataFrame to OptionChain: {df.shape[0]} rows")
+
     if df.empty:
         raise ValueError("Empty DataFrame cannot build a chain")
 
     # Ensure 'expiry' is a tz-aware datetime64 column
     if not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
+        logger.debug("Converting expiry column to datetime64")
         df = df.copy()
         df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
 
@@ -108,16 +122,22 @@ def dataframe_to_chain(df: pd.DataFrame) -> OptionChain:
     asof_utc = first.get("asof_utc")
     if pd.isna(asof_utc):
         asof_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        logger.warning("Missing asof_utc in DataFrame, using current time")
     else:
         asof_utc = pd.to_datetime(asof_utc, utc=True).to_pydatetime()
 
-    return OptionChain(
+    chain = OptionChain(
         underlying=str(first["underlying"]),
         asset_class=first["asset_class"],
         spot=_nan_to_none(first.get("spot")),
         asof_utc=asof_utc,
         quotes=quotes,
     )
+
+    logger.debug(
+        f"OptionChain created: {len(chain.quotes)} quotes for {chain.underlying}"
+    )
+    return chain
 
 
 def _nan_to_none(x):
@@ -139,15 +159,32 @@ def _nan_to_none(x):
 
 def save_chain_csv(path: str | Path, chain: OptionChain) -> None:
     """Write a chain to CSV; parents are created if missing."""
+    path_obj = Path(path)
+    logger.info(f"Saving OptionChain to CSV: {path_obj}")
+
     df = chain_to_dataframe(chain)
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
+    path_obj.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path_obj, index=False)
+
+    logger.info(f"Successfully saved {len(df)} rows to {path_obj}")
 
 
 def load_chain_csv(path: str | Path) -> OptionChain:
     """Load a chain from a CSV produced by save_chain_csv()."""
-    df = pd.read_csv(path)
-    return dataframe_to_chain(df)
+    path_obj = Path(path)
+    logger.info(f"Loading OptionChain from CSV: {path_obj}")
+
+    if not path_obj.exists():
+        raise FileNotFoundError(f"CSV file not found: {path_obj}")
+
+    df = pd.read_csv(path_obj)
+    logger.debug(f"Loaded CSV with {df.shape[0]} rows, {df.shape[1]} columns")
+
+    chain = dataframe_to_chain(df)
+    logger.info(
+        f"Successfully loaded OptionChain: {chain.underlying} with {len(chain.quotes)} quotes"
+    )
+    return chain
 
 
 def save_chain_parquet(path: str | Path, chain: OptionChain) -> None:
@@ -155,11 +192,16 @@ def save_chain_parquet(path: str | Path, chain: OptionChain) -> None:
     Write a chain to Parquet (columnar, compressed).
     Requires 'pyarrow' or 'fastparquet'.
     """
+    path_obj = Path(path)
+    logger.info(f"Saving OptionChain to Parquet: {path_obj}")
+
     df = chain_to_dataframe(chain)
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    path_obj.parent.mkdir(parents=True, exist_ok=True)
     try:
-        df.to_parquet(path, index=False)
+        df.to_parquet(path_obj, index=False)
+        logger.info(f"Successfully saved {len(df)} rows to {path_obj}")
     except Exception as e:
+        logger.error(f"Failed to save Parquet: {e}")
         raise RuntimeError(
             "Parquet support requires 'pyarrow' or 'fastparquet'. Install one of them."
         ) from e
@@ -167,13 +209,28 @@ def save_chain_parquet(path: str | Path, chain: OptionChain) -> None:
 
 def load_chain_parquet(path: str | Path) -> OptionChain:
     """Load a chain from a Parquet file created by save_chain_parquet()."""
+    path_obj = Path(path)
+    logger.info(f"Loading OptionChain from Parquet: {path_obj}")
+
+    if not path_obj.exists():
+        raise FileNotFoundError(f"Parquet file not found: {path_obj}")
+
     try:
-        df = pd.read_parquet(path)
+        df = pd.read_parquet(path_obj)
+        logger.debug(
+            f"Loaded Parquet with {df.shape[0]} rows, {df.shape[1]} columns"
+        )
     except Exception as e:
+        logger.error(f"Failed to load Parquet: {e}")
         raise RuntimeError(
             "Parquet support requires 'pyarrow' or 'fastparquet'. Install one of them."
         ) from e
-    return dataframe_to_chain(df)
+
+    chain = dataframe_to_chain(df)
+    logger.info(
+        f"Successfully loaded OptionChain: {chain.underlying} with {len(chain.quotes)} quotes"
+    )
+    return chain
 
 
 # ----------------- Batch helpers -----------------
@@ -181,9 +238,27 @@ def load_chain_parquet(path: str | Path) -> OptionChain:
 
 def load_chains_csv(paths: Iterable[str | Path]) -> List[OptionChain]:
     """Load multiple CSV chains into memory."""
-    return [load_chain_csv(p) for p in paths]
+    path_list = list(paths)
+    logger.info(f"Loading {len(path_list)} CSV files")
+
+    chains = []
+    for i, path in enumerate(path_list, 1):
+        logger.debug(f"Loading CSV {i}/{len(path_list)}: {path}")
+        chains.append(load_chain_csv(path))
+
+    logger.info(f"Successfully loaded {len(chains)} OptionChains from CSV")
+    return chains
 
 
 def load_chains_parquet(paths: Iterable[str | Path]) -> List[OptionChain]:
     """Load multiple Parquet chains into memory."""
-    return [load_chain_parquet(p) for p in paths]
+    path_list = list(paths)
+    logger.info(f"Loading {len(path_list)} Parquet files")
+
+    chains = []
+    for i, path in enumerate(path_list, 1):
+        logger.debug(f"Loading Parquet {i}/{len(path_list)}: {path}")
+        chains.append(load_chain_parquet(path))
+
+    logger.info(f"Successfully loaded {len(chains)} OptionChains from Parquet")
+    return chains

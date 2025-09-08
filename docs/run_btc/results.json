@@ -1,0 +1,21 @@
+{
+  "asset_class": "crypto",
+  "underlying": "BTC",
+  "expiry": "2025-09-26",
+  "asof_utc": "2025-09-08T02:27:08.849328+00:00",
+  "n_quotes": 100,
+  "r": 0.05,
+  "T": 0.049001544815575324,
+  "F": 110999.02329582139,
+  "svi": {
+    "note": "Insufficient IV points: 0 < 7"
+  },
+  "bl": {
+    "integral": 1.0,
+    "neg_frac": 0.12718204488778054,
+    "rn_mean": 110191.4265401245,
+    "rn_var": 147335574.11914805,
+    "note": "pchipped uniform grid"
+  },
+  "notes": ""
+}

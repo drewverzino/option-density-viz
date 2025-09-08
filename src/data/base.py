@@ -14,6 +14,7 @@ Tip:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Literal, Optional, Protocol
@@ -21,6 +22,8 @@ from typing import Dict, List, Literal, Optional, Protocol
 # A couple of small, expressive type aliases for clarity
 OptType = Literal["C", "P"]  # option type: Call or Put
 AssetClass = Literal["equity", "crypto"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +70,16 @@ class OptionChain:
     spot: Optional[float]
     asof_utc: datetime
     quotes: List[OptionQuote]
+
+    def __post_init__(self):
+        """Log chain summary after creation."""
+        n_calls = sum(1 for q in self.quotes if q.opt_type == "C")
+        n_puts = sum(1 for q in self.quotes if q.opt_type == "P")
+        logger.debug(
+            f"Created OptionChain: {self.underlying} ({self.asset_class}) "
+            f"with {len(self.quotes)} quotes ({n_calls}C, {n_puts}P), "
+            f"spot={self.spot}"
+        )
 
 
 class OptionFetcher(Protocol):

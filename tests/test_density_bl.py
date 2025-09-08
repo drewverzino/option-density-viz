@@ -1,8 +1,12 @@
 import numpy as np
 import pytest
+from scipy.special import erf
 
-from density.bl import bl_pdf_from_calls
-from density.cdf import build_cdf, moments_from_pdf
+from density.bl import (
+    bl_pdf_from_calls,
+    bl_pdf_from_calls_nonuniform,
+)
+from density.cdf import moments_from_pdf
 
 
 def _make_lognormal_pdf(F=100.0, vol=0.2, T=0.5, n=2000, xmax_mult=3.0):
@@ -78,3 +82,50 @@ def test_bl_handles_small_input():
     Ku, pdf, diag = bl_pdf_from_calls(Ks, C, r=0.0, T=0.25, grid_n=51)
     assert np.isfinite(pdf).all()
     assert 0.9 <= diag.integral <= 1.1
+
+
+def _black76_call(F, K, T, r, sigma):
+    """Black-76 call option pricing (vectorized)."""
+    # Use numpy functions for vectorized operations
+    Df = np.exp(-r * T)
+    d1 = (np.log(F / K) + 0.5 * sigma**2 * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+
+    # Use scipy.special.erf for vectorized operations
+    Phi = lambda z: 0.5 * (1.0 + erf(z / np.sqrt(2.0)))
+
+    return Df * (F * Phi(d1) - K * Phi(d2))
+
+
+def test_bl_uniform_grid_synthetic():
+    F, r, T, sigma = 100.0, 0.02, 0.25, 0.4
+    K = np.linspace(50.0, 170.0, 241)
+    C = _black76_call(F, K, T, r, sigma)
+
+    Ku, pdf, diag = bl_pdf_from_calls(K, C, r=r, T=T, grid_n=401)
+
+    # Normalization and mean sanity
+    assert 0.98 <= diag.integral <= 1.02
+    assert abs(diag.rn_mean - F) <= 2.0  # within ~2 bucks on synthetic curve
+    # Limited negative mass fraction before clipping is okay on numeric grids
+    assert 0.0 <= diag.neg_frac <= 0.25
+    # pdf non-negativity after clipping
+    assert np.all(pdf >= 0.0)
+    # Grid alignment
+    assert Ku.size == pdf.size
+
+
+def test_bl_nonuniform_grid_synthetic():
+    F, r, T, sigma = 100.0, 0.01, 0.5, 0.35
+    K = np.array(
+        [60, 70, 80, 85, 90, 92, 95, 97, 100, 103, 106, 110, 120, 135, 150],
+        dtype=float,
+    )
+    C = _black76_call(F, K, T, r, sigma)
+
+    Kn, pdf, diag = bl_pdf_from_calls_nonuniform(K, C, r=r, T=T)
+
+    assert 0.98 <= diag.integral <= 1.02
+    assert abs(diag.rn_mean - F) <= 3.0
+    assert np.all(pdf >= 0.0)
+    assert Kn.size == pdf.size

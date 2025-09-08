@@ -3,7 +3,7 @@
 ## Legend
 
 Status: 🟦 To Do · 🟨 In Progress · 🟩 Done  
-Tags: 🧱 Infra · 🔑 Auth · 📈 Modeling · 📐 Density · 🧮 Preprocess · 📊 Viz · 🧪 Tests · 📦 CLI/Docs
+Tags: 🧱 Infra · 🔑 Auth · 📈 Modeling · 📐 Density · 🧮 Preprocess · 📊 Viz · 🧪 Tests · 📦 CLI/Docs · 🪵 Logging
 
 Tip: Assign an owner by replacing `Owner: ___`. Move items between the three status sections below.
 
@@ -11,108 +11,67 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 
 ## 🟦 To Do
 
-### data/ (backends, plumbing) 🧱
-
-- [ ] data/historical_loader.py — add Parquet dependency docs & CLI example  
-  Owner: ___ · Tags: 🧱  
-  <details><summary>Spec & DoD</summary>
-  
-  - Document `pyarrow`/`fastparquet` install; provide a short CLI example to save/load.  
-  - DoD: README snippet runs successfully after installing optional deps.
-  </details>
-
-### preprocess/ (cleaning, transforms) 🧮
-
-*(Core preprocessing helpers are shipped; add enhancements or edge-case handling here.)*
-
-- [ ] preprocess/midprice.py — enhancements  
-  Owner: ___ · Tags: 🧮  
-  <details><summary>Spec & DoD</summary>
-  
-  - Add configurable outlier rejection and timestamp staleness checks.  
-  - DoD: unit tests for outlier clipping & staleness pass.
-  </details>
-
-- [ ] preprocess/pcp.py — diagnostics extras  
-  Owner: ___ · Tags: 🧮  
-  <details><summary>Spec & DoD</summary>
-  
-  - Add residual histogram helper & threshold alert callback.  
-  - DoD: function returns bins/alerts; plotted in notebook.
-  </details>
-
-- [ ] preprocess/forward.py — robustness  
-  Owner: ___ · Tags: 🧮  
-  <details><summary>Spec & DoD</summary>
-  
-  - Add fallback to put–call average forward if pairs are sparse; warn on instability.  
-  - DoD: unit test with sparse pairs passes; warning surfaced.
-  </details>
-
 ### vol/ (smiles, surfaces) 📈
 
-*(Core SVI stack is shipped.)*
+- [ ] vol/surface.py — maturity smoothing & term-structure diagnostics  
+  Owner: Drew · Tags: 📈  
+  <details><summary>Spec & DoD</summary>
+
+  - Smooth per-expiry SVI parameters over T (spline / low-order poly).  
+  - Add calendar monotonicity checks on total variance across maturities.  
+  - DoD: term surface yields continuous Σ(k,T); calendar constraints pass on sample snapshot.
+  </details>
 
 ### density/ (RND) 📐
 
-- [ ] density/bl.py — BL finite differences  
+- [ ] density/cos.py — COS (characteristic-function) method  
   Owner: ___ · Tags: 📐  
   <details><summary>Spec & DoD</summary>
-  
-  - Central / higher-order differences; adaptive spacing near kinks.  
-  - DoD: pdf ≥0 on ≥98% grid; ∫pdf = 1 ± 0.01.
-  </details>
 
-- [ ] density/cdf.py — CDF & quantiles  
-  Owner: ___ · Tags: 📐  
-  <details><summary>Spec & DoD</summary>
-  
-  - Integrate pdf; inverse-CDF via monotone spline; VaR stats.  
-  - DoD: median/quantiles consistent with forward/variance.
+  - Implement generic COS engine with cumulant-based [a,b] bounds and series control N.  
+  - Provide a Black–Scholes CF baseline and parity check vs closed form.  
+  - DoD: prices match BS within 1e-4; density normalizes to 1±1e-3.
   </details>
 
 ### viz/ (plots, dashboard) 📊
 
-- [ ] viz/plots.py — smiles & densities  
-  Owner: ___ · Tags: 📊  
-  <details><summary>Spec & DoD</summary>
-  
-  - IV vs log-moneyness; PDF/CDF with mean/median overlays; light/dark theme.  
-  - DoD: PNGs saved; functions return `matplotlib.Figure`.
-  </details>
-
 - [ ] viz/dashboard.py — Streamlit demo  
   Owner: ___ · Tags: 📊  
   <details><summary>Spec & DoD</summary>
-  
-  - Select backend (equity/crypto), ticker, expiry; export plots.  
+
+  - Select backend (equity/crypto), ticker, expiry; run full pipeline; export plots.  
   - DoD: one-file app runs locally and updates interactively.
   </details>
 
 ### cli/, tests/, docs/ 📦
 
-- [ ] cli/main.py — minimal CLI  
-  Owner: ___ · Tags: 📦  
-  <details><summary>Spec & DoD</summary>
-  
-  - `oviz fetch --asset-class equity --underlying AAPL --expiry 2025-12-19`  
-    `oviz fetch --asset-class crypto --underlying BTC --expiry YYMMDD`  
-  - DoD: writes normalized JSON/CSV + PNGs; exit codes on failure.
-  </details>
-
-- [ ] tests/ — network & failure-path 🧪  
+- [ ] tests/cli_smoke.py — CLI smoke + artifact checks 🧪  
   Owner: ___ · Tags: 🧪  
   <details><summary>Spec & DoD</summary>
-  
-  - Add opt-in network smoke tests (OKX/yfinance) and failure-path tests; consolidate coverage ≥80%.  
-  - DoD: `pytest -m "network"` runs only when `OVIZ_RUN_NETWORK=1` is set.
+
+  - Run CLI for AAPL (equity) and BTC (crypto) with a short grid; assert artifacts exist.  
+  - DoD: green locally; skips network by flag when needed.
+  </details>
+
+- [ ] docs/gallery — curated artifact images 📦  
+  Owner: ___ · Tags: 📦  
+  <details><summary>Spec & DoD</summary>
+
+  - Commit a few PNGs (smile + density) for BTC and AAPL with timestamps.  
+  - DoD: README links to these images.
   </details>
 
 ---
 
 ## 🟨 In Progress
 
-- (Move items here as you pick them up; keep the same card format.)
+- [ ] vol/surface.py — basic multi-expiry helpers (wiring)  
+  Owner: Drew · Tags: 📈  
+  <details><summary>Now</summary>
+
+  - Utility to fit SVI per-expiry and return a dict of fits; expose `get_iv(strike, expiry)` via nearest/linear blend.  
+  - Next: smoothing across T and calendar checks.
+  </details>
 
 ---
 
@@ -123,64 +82,62 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 - [x] data/base.py — shared types and interface  
   Owner: Drew · Tags: 🧱  
   <details><summary>What shipped</summary>
-  
+
   - `OptionQuote`, `OptionChain` dataclasses; `OptionFetcher` protocol (`list_expiries`, `fetch_chain`).  
-  - Typed throughout; designed to be backend-agnostic (equity/crypto).
+  - Backend-agnostic for crypto/equity.
   </details>
 
 - [x] data/registry.py — backend factory  
   Owner: Drew · Tags: 🧱  
   <details><summary>What shipped</summary>
-  
+
   - `get_fetcher("equity"|"crypto")` → `YFinanceFetcher` / `OKXFetcher`; kwargs forwarded.  
   - Smoke test returns ≥1 quote for AAPL and BTC.
-  </details>
-
-- [x] data/cache.py — in-memory+disk caching  
-  Owner: Drew · Tags: 🧱  
-  <details><summary>What shipped</summary>
-  
-  - `KVCache` with TTL; fast in-memory + SQLite persistence; `get_cached(key, fetch_fn, ttl)`.  
-  - `vacuum_disk()` and memory promotion on disk hit.
-  </details>
-
-- [x] data/historical_loader.py — normalized offline chains  
-  Owner: Drew · Tags: 🧱  
-  <details><summary>What shipped</summary>
-  
-  - `save_chain_csv/parquet`, `load_chain_csv/parquet`; `chain_to_dataframe`, `dataframe_to_chain`.  
-  - Batch helpers; transparent timezone handling for expiries/as-of.
-  </details>
-
-- [x] data/risk_free.py — SOFR loader + fallback  
-  Owner: Drew · Tags: 🧱  
-  <details><summary>What shipped</summary>
-  
-  - `RiskFreeProvider(get_rate)` with CSV support, forward-fill option, and constant fallback.  
-  - Graceful behavior outside CSV range.
-  </details>
-
-- [x] data/rate_limit.py — polite throttling utilities  
-  Owner: Drew · Tags: 🧱  
-  <details><summary>What shipped</summary>
-  
-  - `AsyncRateLimiter(max_concurrent)` and `retry_with_backoff(...)` with jitter.  
-  - Integrated into OKX ticker fetch loop; patterns documented.
   </details>
 
 - [x] data/yf_fetcher.py — equities via yfinance (sync → `asyncio.to_thread`)  
   Owner: Drew · Tags: 🧱  
   <details><summary>What shipped</summary>
-  
-  - Fixed `.option_chain()` unpack bug; robust spot retrieval; IV forwarded via `extra["iv"]`.
+
+  - Robust spot retrieval; `.option_chain()` handling; IV forwarded via `extra["iv"]` when present.
   </details>
 
 - [x] data/okx_fetcher.py — crypto via OKX (public endpoints)  
   Owner: Drew · Tags: 🧱  
   <details><summary>What shipped</summary>
-  
-  - YYMMDD/ YYYYMMDD expiry parsing; server-time sync; **integrated `AsyncRateLimiter` + `retry_with_backoff`** for ticker calls; **instrument list cached** via `KVCache` (1h TTL).  
+
+  - YYMMDD/ YYYYMMDD expiry parsing; server-time sync; `AsyncRateLimiter` + backoff for ticker calls; instrument list cached via `KVCache` (1h TTL).  
   - Public instruments/tickers/index spot; helpful error body on failures.
+  </details>
+
+- [x] data/cache.py — in-memory + SQLite TTL cache  
+  Owner: Drew · Tags: 🧱  
+  <details><summary>What shipped</summary>
+
+  - `KVCache` with TTL and persistence; `get_cached(key, fetch_fn, ttl)`; `vacuum_disk()` helper.
+  </details>
+
+- [x] data/historical_loader.py — CSV/Parquet save/load  
+  Owner: Drew · Tags: 🧱  
+  <details><summary>What shipped</summary>
+
+  - `chain_to_dataframe`, `dataframe_to_chain`; `save_chain_csv/parquet`, `load_chain_csv/parquet`.  
+  - Batch helpers; tz-safe expiries/as-of.
+  </details>
+
+- [x] data/risk_free.py — SOFR loader + constant fallback  
+  Owner: Drew · Tags: 🧱  
+  <details><summary>What shipped</summary>
+
+  - `RiskFreeProvider(get_rate)` with CSV support, forward-fill option, and default constant.
+  </details>
+
+- [x] data/rate_limit.py — polite throttling utilities  
+  Owner: Drew · Tags: 🧱  
+  <details><summary>What shipped</summary>
+
+  - `AsyncRateLimiter(max_concurrent)` and `retry_with_backoff(...)` with jitter.  
+  - Patterns integrated into OKX fetcher.
   </details>
 
 ### preprocess/ 🧮
@@ -188,85 +145,106 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 - [x] preprocess/midprice.py — robust mids + flags  
   Owner: Drew · Tags: 🧮  
   <details><summary>What shipped</summary>
-  
-  - Vectorized mids with fallback (bid-only/ask-only), crossed/wide flags, relative spread.  
-  - Side-used label for auditing; NaN-safe; configurable thresholds.
+
+  - Vectorized mids with fallback (bid-only/ask-only), crossed/wide flags, relative spread; configurable thresholds.
   </details>
 
-- [x] preprocess/pcp.py — put–call parity diagnostics  
+- [x] preprocess/pcp.py — PCP synthesis + diagnostics  
   Owner: Drew · Tags: 🧮  
   <details><summary>What shipped</summary>
-  
-  - Synthetic legs from PCP; residual computation; strike-pivot helper.  
-  - Clean API for plugging into notebooks and tests.
+
+  - `synthesize_missing_leg`, residual computation, strike pivot helpers.
   </details>
 
 - [x] preprocess/forward.py — forward & log-moneyness  
   Owner: Drew · Tags: 🧮  
   <details><summary>What shipped</summary>
-  
-  - Forward formula, log-moneyness, `estimate_forward_from_chain` and PCP-based estimator as a fallback.
+
+  - `estimate_forward_from_pcp` (pairs), `yearfrac`, carry model fallback.
   </details>
 
-### vol/ 📈
+### vol/ (smiles, surfaces) 📈
 
-- [x] vol/svi.py — SVI calibration  
+- [x] vol/svi.py — SVI calibration (quotes→fit)  
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
-  
-  - `w(k)=a+b(ρ(k−m)+sqrt((k−m)^2+σ^2))`; grid seeds + L-BFGS-B; bounds & mild regularization; price-weighting option.  
-  - Clear return type `SVIFit(params, loss, n_used, method, notes)`.
+
+  - Price-to-IV bootstrapping; vega/price-weighted losses; bounds/regularization; stable seeds; returns `SVIFit` with diagnostics.
   </details>
 
-- [x] vol/no_arb.py — arbitrage checks  
+- [x] vol/no_arb.py — butterfly & calendar checks (per-expiry)  
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
-  
-  - Butterfly positivity and calendar monotonicity helpers with diagnostics structure.
+
+  - Discrete convexity screen; simple calendar monotonicity spot checks with reasons.
   </details>
 
-- [x] vol/surface.py — across maturities (+ price→IV bootstrapping)  
+- [x] vol/surface.py — per-expiry SVI fit collection (basic)  
   Owner: Drew · Tags: 📈  
   <details><summary>What shipped</summary>
-  
-  - Fit per-expiry SVI using IVs or **solve IV from call prices** (Black-76) if missing; smooth params; evaluate w(k,T)/σ(K,T).
+
+  - Fit SVI per expiry; simple API to query IV via nearest/linear blend.  
+  - Next: smooth params across T (see To Do).
   </details>
 
-### tests & notebooks 📦
+### density/ 📐
 
-- [x] tests/preprocess_* — unit tests for preprocess  
-  Owner: Drew · Tags: 🧪  
+- [x] density/bl.py — BL finite differences (stabilized)  
+  Owner: Drew · Tags: 📐  
   <details><summary>What shipped</summary>
-  
-  - `test_preprocess_midprice.py`, `test_preprocess_pcp.py`, `test_preprocess_forward.py` covering mids, PCP identities, and forward estimation.
+
+  - Central differences on smoothed price curve; clipping + optional renormalization; integral/negativity diagnostics.
   </details>
 
-- [x] tests/vol_* — unit tests for vol  
-  Owner: Drew · Tags: 🧪  
+- [x] density/cdf.py — CDF, moments & helpers  
+  Owner: Drew · Tags: 📐  
   <details><summary>What shipped</summary>
-  
-  - Synthetic SVI fit test; no-arb (butterfly/calendar) checks.
+
+  - `build_cdf`, `moments_from_pdf`, `interpolate_pdf`, `grid_from_calls` utilities.
   </details>
 
-- [x] notebooks/data_test.ipynb — end-to-end data validation  
+### viz/ 📊
+
+- [x] viz/plots.py — smiles & densities  
+  Owner: Drew · Tags: 📊  
+  <details><summary>What shipped</summary>
+
+  - Market smile, SVI vs market, PDF+CDF with markers; light/dark themes.
+  </details>
+
+### cli/, notebooks, docs 📦
+
+- [x] cli/main.py — unified CLI (Windows-safe asyncio)  
   Owner: Drew · Tags: 📦  
   <details><summary>What shipped</summary>
-  
-  - PYTHONPATH setup; equity + crypto chain tests; cache/risk-free/limiter demos; CSV round-trip.
+
+  - Single-event-loop runner; artifacts: `chain.csv`, `results.json`, `smile_*.png`, `density_pdf_cdf.png`.
   </details>
 
-- [x] notebooks/suite_test.ipynb — data → preprocess → vol → density scaffold  
+- [x] notebooks/data_test.ipynb — data validation  
+  Owner: Drew · Tags: 📦
+
+- [x] notebooks/suite_test.ipynb — data → preprocess → vol → density  
   Owner: Drew · Tags: 📦  
+
+- [x] README — updated (OKX+yfinance, CLI, Results/Theory)  
+  Owner: Drew · Tags: 📦  
+
+### logging 🪵
+
+- [x] utils/logging.py — project-wide structured logging  
+  Owner: Drew · Tags: 🪵  
   <details><summary>What shipped</summary>
-  
-  - Full pipeline demonstration; BL/CDF sections ready to plug in once density module lands.
+
+  - `setup_logging`, `get_logger`, request-level `set_context`, timing decorator `log_timing`, and `span` context.  
+  - JSON or console output via env flags: `OVIZ_LOG_JSON`, `OVIZ_LOG_LEVEL`.
   </details>
 
-- [x] README — updated with Results & Theory Deep Dive  
-  Owner: Drew · Tags: 📦  
+- [x] **Instrumentation across modules**  
+  Owner: Drew · Tags: 🪵  
   <details><summary>What shipped</summary>
-  
-  - Pitch-style overview, artifacts/metrics in Results, and a deeper theory section (RN measure, SVI, BL, COS).
+
+  - Data (OKX/yfinance/cache/risk-free), Preprocess (mids/PCP/forward), Vol (SVI/no-arb/surface), Density (BL/CDF), Viz, and CLI now emit concise, contextual logs (counts, params, diagnostics, artifact paths).
   </details>
 
 ---
@@ -274,9 +252,9 @@ Tip: Assign an owner by replacing `Owner: ___`. Move items between the three sta
 ## New card template (copy below)
 
 - [ ] path/to/file.py — short task title  
-  Owner: ___ · Tags: (choose from 🧱 🔑 📈 📐 🧮 📊 🧪 📦)  
+  Owner: ___ · Tags: (choose from 🧱 🔑 📈 📐 🧮 📊 🧪 📦 🪵)  
   <details><summary>Spec & DoD</summary>
-  
+
   - What to build:  
   - API:  
   - Edge cases:  

@@ -19,6 +19,7 @@ import asyncio
 import base64
 import hmac
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -28,6 +29,8 @@ import httpx
 from dotenv import load_dotenv
 
 from .base import OptionChain, OptionFetcher, OptionQuote
+
+logger = logging.getLogger(__name__)
 
 # Load .env for optional private credentials (OKX_API_KEY/SECRET/PASSPHRASE)
 load_dotenv()
@@ -124,18 +127,52 @@ class OKXFetcher(OptionFetcher):
         # One async client for the fetcher lifetime
         self.client = httpx.AsyncClient(timeout=timeout)
 
+        # Log initialization
+        has_creds = bool(
+            self.api_key and self.api_secret_bytes and self.passphrase
+        )
+        logger.info(
+            f"OKXFetcher initialized (base: {self.BASE}, "
+            f"credentials: {'✓' if has_creds else '✗'}, "
+            f"simulated: {SIM_ENV}, timeout: {timeout}s)"
+        )
+
     # -------- public: instruments / expiries / tickers --------
 
     async def list_expiries(self, underlying: str) -> List[datetime]:
         """
         Return a sorted list of expiry dates available for the given underlying (BTC, ETH, ...).
         """
+        logger.info(f"Listing expiries for {underlying}")
+
         insts = await self._get_instruments(underlying)
-        exps = sorted(
-            {
-                _parse_expiry_token(_expiry_token_from_instid(i["instId"]))
-                for i in insts
-            }
+        logger.debug(f"Found {len(insts)} instruments for {underlying}")
+
+        # Extract unique expiry tokens
+        expiry_tokens = set()
+        for i in insts:
+            try:
+                token = _expiry_token_from_instid(i["instId"])
+                expiry_tokens.add(token)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse expiry from {i['instId']}: {e}"
+                )
+
+        # Parse tokens to dates
+        exps = []
+        for token in expiry_tokens:
+            try:
+                exp_date = _parse_expiry_token(token)
+                exps.append(exp_date)
+            except Exception as e:
+                logger.warning(f"Failed to parse expiry token '{token}': {e}")
+
+        exps = sorted(exps)
+        logger.info(
+            f"Found {len(exps)} unique expiries for {underlying}: "
+            f"{[e.date() for e in exps[:5]]}"
+            f"{'...' if len(exps) > 5 else ''}"
         )
         return exps
 
@@ -149,19 +186,31 @@ class OKXFetcher(OptionFetcher):
         - OKX tickers are per-instrument. We fetch each one sequentially with a small delay
           to keep usage polite. For higher throughput, wire in data/rate_limit.py helpers.
         """
+        logger.info(
+            f"Fetching option chain for {underlying} expiry {expiry.date()}"
+        )
+
         insts = await self._get_instruments(underlying)
 
         # Filter instruments by expiry token (OKX typically uses YYMMDD)
         target_token = _okx_token_for(expiry, prefer_short=True)
+        logger.debug(f"Target expiry token: {target_token}")
+
         insts = [
             i
             for i in insts
             if _expiry_token_from_instid(i["instId"]) == target_token
         ]
+        logger.info(
+            f"Found {len(insts)} instruments matching expiry {expiry.date()}"
+        )
 
         # Fetch per-instrument tickers and assemble a map
         symbols = [i["instId"] for i in insts]
+        logger.debug(f"Fetching tickers for {len(symbols)} symbols")
+
         tick_map = await self._get_tickers_map(symbols)
+        logger.debug(f"Retrieved {len(tick_map)} ticker responses")
 
         quotes: List[OptionQuote] = []
         for i in insts:
@@ -190,14 +239,23 @@ class OKXFetcher(OptionFetcher):
                 )
             )
 
+        logger.debug(f"Created {len(quotes)} option quotes")
+
         spot = await self._get_spot(underlying)
-        return OptionChain(
+        logger.info(f"Retrieved spot price for {underlying}: {spot}")
+
+        chain = OptionChain(
             underlying=underlying,
             asset_class="crypto",
             spot=spot,
             asof_utc=datetime.utcnow().replace(tzinfo=timezone.utc),
             quotes=quotes,
         )
+
+        logger.info(
+            f"Created OptionChain for {underlying}: {len(quotes)} quotes, spot={spot}"
+        )
+        return chain
 
     async def _get_instruments(self, underlying: str):
         """
@@ -207,11 +265,19 @@ class OKXFetcher(OptionFetcher):
         """
         uly = f"{underlying}-USD"
         url = f"{self.BASE}/api/v5/public/instruments"
-        r = await self.client.get(
-            url, params={"instType": "OPTION", "uly": uly}
-        )
-        r.raise_for_status()
-        return r.json().get("data", [])
+        logger.debug(f"Fetching instruments for {uly}")
+
+        try:
+            r = await self.client.get(
+                url, params={"instType": "OPTION", "uly": uly}
+            )
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            logger.debug(f"Retrieved {len(data)} instruments for {underlying}")
+            return data
+        except Exception as e:
+            logger.error(f"Failed to fetch instruments for {underlying}: {e}")
+            raise
 
     async def _get_tickers_map(self, inst_ids: List[str]) -> Dict[str, Dict]:
         """
@@ -221,16 +287,33 @@ class OKXFetcher(OptionFetcher):
         - Intentionally slow down with a small sleep to avoid bursty behavior.
           For production, use AsyncRateLimiter + retry_with_backoff.
         """
+        logger.debug(f"Fetching tickers for {len(inst_ids)} instruments")
         out: Dict[str, Dict] = {}
-        for sym in inst_ids:
-            r = await self.client.get(
-                f"{self.BASE}/api/v5/market/ticker", params={"instId": sym}
-            )
-            if r.status_code == 200:
-                d = r.json().get("data", [])
-                if d:
-                    out[sym] = d[0]
+
+        for i, sym in enumerate(inst_ids, 1):
+            if i % 20 == 0:  # Log progress every 20 requests
+                logger.debug(f"Ticker progress: {i}/{len(inst_ids)}")
+
+            try:
+                r = await self.client.get(
+                    f"{self.BASE}/api/v5/market/ticker", params={"instId": sym}
+                )
+                if r.status_code == 200:
+                    d = r.json().get("data", [])
+                    if d:
+                        out[sym] = d[0]
+                else:
+                    logger.warning(
+                        f"Failed to get ticker for {sym}: HTTP {r.status_code}"
+                    )
+            except Exception as e:
+                logger.warning(f"Error fetching ticker for {sym}: {e}")
+
             await asyncio.sleep(0.02)  # be polite
+
+        logger.debug(
+            f"Successfully fetched {len(out)}/{len(inst_ids)} tickers"
+        )
         return out
 
     async def _get_spot(self, underlying: str) -> Optional[float]:
@@ -238,13 +321,24 @@ class OKXFetcher(OptionFetcher):
         Use OKX index price (e.g., BTC-USD) as a spot proxy:
             GET /api/v5/market/index-tickers?instId=BTC-USD
         """
-        r = await self.client.get(
-            f"{self.BASE}/api/v5/market/index-tickers",
-            params={"instId": f"{underlying}-USD"},
-        )
-        if r.status_code == 200 and r.json().get("data"):
-            return _to_float(r.json()["data"][0].get("idxPx"))
-        return None
+        inst_id = f"{underlying}-USD"
+        logger.debug(f"Fetching spot price for {inst_id}")
+
+        try:
+            r = await self.client.get(
+                f"{self.BASE}/api/v5/market/index-tickers",
+                params={"instId": inst_id},
+            )
+            if r.status_code == 200 and r.json().get("data"):
+                spot = _to_float(r.json()["data"][0].get("idxPx"))
+                logger.debug(f"Retrieved spot price: {spot}")
+                return spot
+            else:
+                logger.warning(f"No spot price data for {inst_id}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to fetch spot price for {underlying}: {e}")
+            return None
 
     def _parse_strike_type(self, inst_id: str) -> Tuple[float, str]:
         """BTC-USD-250906-30000-C -> (30000.0, 'C')"""
@@ -275,7 +369,8 @@ class OKXFetcher(OptionFetcher):
             ts_ms = int(r.json()["data"][0]["ts"])
             dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
             return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to get server time, using local time: {e}")
             return (
                 datetime.utcnow()
                 .replace(tzinfo=timezone.utc)
@@ -315,9 +410,12 @@ class OKXFetcher(OptionFetcher):
         the error body for actionable debugging on HTTP errors.
         """
         if not self._has_creds():
+            logger.error("Missing OKX credentials for private endpoint")
             raise RuntimeError(
                 "OKX credentials not set. Provide env vars or pass into OKXFetcher()."
             )
+
+        logger.debug(f"Making private GET request to {path}")
         ts = await self._get_server_time_iso()
         query = ""
         if params:
@@ -326,32 +424,48 @@ class OKXFetcher(OptionFetcher):
         sign = self._sign(ts, "GET", path + query, "")
         headers = self._auth_headers(ts, sign)
         url = f"{self.BASE}{path}{query}"
-        r = await self.client.get(url, headers=headers)
-        if r.status_code >= 400:
-            print("OKX error body:", r.text)
-        r.raise_for_status()
-        return r.json()
+
+        try:
+            r = await self.client.get(url, headers=headers)
+            if r.status_code >= 400:
+                logger.error(f"OKX API error: {r.status_code} - {r.text}")
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.error(f"Private GET request failed: {e}")
+            raise
 
     async def _private_post(self, path: str, payload: Dict) -> Dict:
         """Signed POST request (not currently used in this project)."""
         if not self._has_creds():
+            logger.error("Missing OKX credentials for private endpoint")
             raise RuntimeError(
                 "OKX credentials not set. Provide env vars or pass into OKXFetcher()."
             )
+
+        logger.debug(f"Making private POST request to {path}")
         ts = await self._get_server_time_iso()
         body = json.dumps(payload)
         sign = self._sign(ts, "POST", path, body)
         headers = self._auth_headers(ts, sign)
         url = f"{self.BASE}{path}"
-        r = await self.client.post(url, headers=headers, content=body)
-        if r.status_code >= 400:
-            print("OKX error body:", r.text)
-        r.raise_for_status()
-        return r.json()
+
+        try:
+            r = await self.client.post(url, headers=headers, content=body)
+            if r.status_code >= 400:
+                logger.error(f"OKX API error: {r.status_code} - {r.text}")
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.error(f"Private POST request failed: {e}")
+            raise
 
     # Example private read-only call (requires Account:Read permission)
     async def get_balance(self, ccy: Optional[str] = None) -> Dict:
         """GET /api/v5/account/balance (optionally filter by 'ccy')."""
+        logger.info(
+            f"Fetching account balance" + (f" for {ccy}" if ccy else "")
+        )
         params = {"ccy": ccy} if ccy else None
         return await self._private_get(
             "/api/v5/account/balance", params=params
@@ -359,4 +473,5 @@ class OKXFetcher(OptionFetcher):
 
     async def aclose(self):
         """Close the underlying HTTP client (good hygiene for long tests)."""
+        logger.debug("Closing OKX HTTP client")
         await self.client.aclose()
