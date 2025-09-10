@@ -312,7 +312,7 @@ See [LICENSE](LICENSE) for details.
 
 - [Drew Verzino](https://github.com/drewverzino)
 - [Rahul Rajesh](https://github.com/RajeshGang)
-- [Tinashe Dwemza](https://github.com/tinashe13)
+- [Tinashe Dzemwa](https://github.com/tinashe13)
 
 ---
 
