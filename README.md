@@ -8,7 +8,7 @@ _Risk-neutral probability density visualization from options on **crypto (BTC/ET
 
 ---
 
-## 📌 Overview
+## Overview
 
 `option-density-viz` is a research and visualization tool that extracts **risk-neutral probability densities (RNDs)** from options market data.  
 It normalizes live **BTC/ETH** options from the **OKX public API** and **equity** options via **yfinance**, fits **implied volatility smiles** using an arbitrage‑aware **SVI** workflow, stitches a **volatility surface** across maturities, and (next) applies the **Breeden–Litzenberger relation** and **COS method** to compute and plot the probability density of future prices.
@@ -20,18 +20,18 @@ This project is designed to help **quantitative researchers, students, and trade
 
 ---
 
-## ✨ Features
+## Features
 
-- 🔗 **Live API ingestion** — pull BTC/ETH option chains from **OKX (public endpoints, no keys required)**, plus equity chains from **yfinance**.
-- 🧱 **Unified schema** — a single `OptionQuote`/`OptionChain` model for crypto and equities.
-- 🧮 **Preprocessing helpers** — robust mids/flags, **PCP diagnostics**, **forward estimation from PCP**.
-- 💾 **Reproducibility** — save/load chains to **CSV/Parquet**; build offline datasets for experiments.
-- 🚦 **Polite data fetching** — **TTL cache** (in‑mem + SQLite), **async** calls, **rate‑limit** gate + **exponential backoff** retries.
-- 📈 **SVI calibration** — vega‑weighted least squares (Black‑76), grid‑seeded **L‑BFGS‑B** with safe bounds.
-- 🧰 **No‑arbitrage checks** — butterfly convexity and calendar monotonicity diagnostics.
+- **Live API ingestion** — pull BTC/ETH option chains from **OKX (public endpoints, no keys required)**, plus equity chains from **yfinance**.
+- **Unified schema** — a single `OptionQuote`/`OptionChain` model for crypto and equities.
+- **Preprocessing helpers** — robust mids/flags, **PCP diagnostics**, **forward estimation from PCP**.
+- **Reproducibility** — save/load chains to **CSV/Parquet**; build offline datasets for experiments.
+- **Polite data fetching** — **TTL cache** (in‑mem + SQLite), **async** calls, **rate‑limit** gate + **exponential backoff** retries.
+- **SVI calibration** — vega‑weighted least squares (Black‑76), grid‑seeded **L‑BFGS‑B** with safe bounds.
+- **No‑arbitrage checks** — butterfly convexity and calendar monotonicity diagnostics.
 - 🗺 **Surface fitting** — per‑expiry SVI → smoothed parameters across maturities with evaluators `iv(k,T)` / `w(k,T)`.
-- 🎨 **Visualization** — Matplotlib plots for smiles/surfaces now; Streamlit dashboard planned.
-- 📊 **RND extraction (roadmap)** — **Breeden–Litzenberger** (finite differences) and **COS** (Fourier) methods.
+- **Visualization** — Matplotlib plots for smiles/surfaces now; Streamlit dashboard planned.
+- **RND extraction (roadmap)** — **Breeden–Litzenberger** (finite differences) and **COS** (Fourier) methods.
 
 ---
 
@@ -72,7 +72,7 @@ option-density-viz/
 
 ---
 
-## ⚡ Installation
+## Installation
 
 Clone the repository and install dependencies:
 
@@ -94,7 +94,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Quickstart (data only)
 
@@ -174,7 +174,7 @@ Artifacts created in `--out`:
 
 ---
 
-## 📊 Results
+## Results
 
 This section highlights example artifacts and the **metrics** we track to sanity‑check calibrations and densities. Commit a small set of figures to `docs/` so reviewers can skim results without running anything.
 
@@ -204,7 +204,7 @@ We summarize each snapshot (per expiry) with:
 
 > Until the density modules land, focus results on **data completeness**, **SVI fit quality**, **no‑arb diagnostics**, and **reproducibility** (CSV/Parquet round‑trips).
 
-## 📚 Theory Background
+## Theory Background
 
 - **Breeden–Litzenberger (1978)**: Risk-neutral density can be obtained as the **second derivative** of option prices w.r.t. strike.
 - **SVI (Stochastic Volatility Inspired)**: Robust parametrization of implied volatility smiles that enforces arbitrage-aware conditions.
@@ -212,7 +212,7 @@ We summarize each snapshot (per expiry) with:
 
 ---
 
-## 🧠 Theory Deep Dive
+## Theory Deep Dive
 
 This project sits at the intersection of **derivatives pricing** and **numerical analysis**. Below are the core concepts and how we use them.
 
@@ -289,7 +289,7 @@ This project sits at the intersection of **derivatives pricing** and **numerical
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome!
 
@@ -301,14 +301,14 @@ Contributions are welcome!
 
 ---
 
-## 📜 License
+## License
 
 MIT License © 2025 `option-density-viz` contributors.  
 See [LICENSE](LICENSE) for details.
 
 ---
 
-## 👥 Authors
+## Authors
 
 - [Drew Verzino](https://github.com/drewverzino)
 - [Rahul Rajesh](https://github.com/RajeshGang)
@@ -316,7 +316,7 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-## 🙌 Acknowledgments
+## Acknowledgments
 
 - **OKX** for public crypto options data  
 - **yfinance** for convenient equity options data  
